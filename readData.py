@@ -1,13 +1,32 @@
 
 
 class Satellite:
-   def __init__(self, name: str, id: str, elements: dict):
+   def __init__(self, name: str, metadata: dict, orbitals: dict):
       self.name = name
-      self.id = id
-      self.elements = elements
+      self.id = metadata["NORAD"]
+      self.metadata = metadata
+      self.orbitals = orbitals
 
    def __str__(self):
       return f"Satellite Name: {self.name} | ID: {self.id}"
+   
+   def __getitem__(self, key):
+      if key == "metadata":
+         return self.metadata
+      elif key == "orbitals":
+         return self.orbitals
+      elif key == "name":
+         return self.name
+      elif key == "id":
+         return self.id
+      else:
+         raise KeyError(f"{key} not found in Satellite object.")
+      
+   def formatCSV(self):
+      csv = ""
+      for value in (*self.metadata.values(), *self.orbitals.values()):
+         csv += "," + value
+      return csv
 
 f = open("data/LEO_TLE.txt", "r")
 raw = f.read()
@@ -39,13 +58,18 @@ def parseObjData(metadata: str, orbitals: str):
    }
    return (metadata, orbitals)
 
+def createSatObj(name, tle1, tle2):
+   metadata, orbitals = parseObjData(tle1, tle2)
+   sat = Satellite(name, metadata["NORAD"], metadata, orbitals)
+   return sat
+
 c = 0 #count var
 for sat in range(numSats):
    name = " ".join(lines[c].split()[1:])
    metadata = lines[c+1]
    orbitals = lines[c+2]
    metadata, orbitals = parseObjData(metadata, orbitals)
-   satObj = Satellite(name, metadata["NORAD"], orbitals)
+   satObj = Satellite(name, metadata, orbitals)
    print(satObj)
    c += 3
    break

@@ -1,6 +1,7 @@
 import requests
 import os
 from dotenv import load_dotenv
+from readData import parseObjData, createSatObj
 
 load_dotenv()
 
@@ -31,6 +32,10 @@ if response.status_code == 200:
     print(f"Received {len(satData)} records")
 
 with open("data/LEO_3LE.csv", "w") as file:
-    file.write("OBJECT_NAME,OBJECT_ID, ")
+    file.write("name,NORAD,internationalDesignator,epochTime,firstTimeDerivative,secondTimeDerivative,drag,inclination,RAAN,eccentricity,perigee,meanAnomaly,meanMotion")
     for satellite in satData:
-        file.write(f"{satellite["OBJECT_NAME"]},{satellite["OBJECT_ID"]}")
+        tle1 = satellite["TLE_LINE1"]
+        tle2 = satellite["TLE_LINE2"]
+        sat = createSatObj(satellite["OBJECT_NAME"], tle1, tle2)
+        file.write(satellite["OBJECT_NAME"] + "," + satellite["OBJECT_ID"])
+        
