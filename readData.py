@@ -23,7 +23,7 @@ class Satellite:
          raise KeyError(f"{key} not found in Satellite object.")
       
    def formatCSV(self):
-      csv = ""
+      csv = f"{self.name},{self.id}"
       for value in (*self.metadata.values(), *self.orbitals.values()):
          csv += "," + value
       return csv

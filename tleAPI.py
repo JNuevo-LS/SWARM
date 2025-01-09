@@ -9,7 +9,7 @@ username = os.environ.get("USERNAME")
 password = os.environ.get("PASSWORD")
 
 loginURL = 'https://www.space-track.org/ajaxauth/login'
-url = "https://www.space-track.org/basicspacedata/query/class/satcat/OBJECT_TYPE/PAYLOAD/DECAY/null/LAUNCH_DATE/>2010-01-01/orderby/LAUNCH_DATE"
+url = "https://www.space-track.org/basicspacedata/query/class/satcat/PERIOD/%3C128/DECAY/null-val/CURRENT/Y/format/tle"
 
 session = requests.Session()
 
@@ -34,8 +34,9 @@ if response.status_code == 200:
 with open("data/LEO_3LE.csv", "w") as file:
     file.write("name,NORAD,internationalDesignator,epochTime,firstTimeDerivative,secondTimeDerivative,drag,inclination,RAAN,eccentricity,perigee,meanAnomaly,meanMotion")
     for satellite in satData:
+        print(satellite)
         tle1 = satellite["TLE_LINE1"]
         tle2 = satellite["TLE_LINE2"]
         sat = createSatObj(satellite["OBJECT_NAME"], tle1, tle2)
-        file.write(satellite["OBJECT_NAME"] + "," + satellite["OBJECT_ID"])
-        
+        csv = sat.formatCSV()
+        file.write(csv+"\n")
