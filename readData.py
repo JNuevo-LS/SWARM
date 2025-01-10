@@ -1,5 +1,3 @@
-
-
 class Satellite:
    def __init__(self, name: str, metadata: dict, orbitals: dict):
       self.name = name
@@ -28,12 +26,6 @@ class Satellite:
          csv += "," + value
       return csv
 
-f = open("data/LEO_TLE.txt", "r")
-raw = f.read()
-lines = raw.split("\n")
-numSats = int(len(lines) / 3)
-allSatObjects = {}
-
 def parseObjData(metadata: str, orbitals: str):
    #metadata
    metadataSplit = metadata.split()
@@ -60,17 +52,5 @@ def parseObjData(metadata: str, orbitals: str):
 
 def createSatObj(name, tle1, tle2):
    metadata, orbitals = parseObjData(tle1, tle2)
-   sat = Satellite(name, metadata["NORAD"], metadata, orbitals)
+   sat = Satellite(name, metadata, orbitals)
    return sat
-
-c = 0 #count var
-for sat in range(numSats):
-   name = " ".join(lines[c].split()[1:])
-   metadata = lines[c+1]
-   orbitals = lines[c+2]
-   metadata, orbitals = parseObjData(metadata, orbitals)
-   satObj = Satellite(name, metadata, orbitals)
-   print(satObj)
-   c += 3
-   break
-del c
