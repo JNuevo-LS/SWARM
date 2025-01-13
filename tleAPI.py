@@ -80,7 +80,7 @@ for i in range(730): # 365 days * 10 (years of data) = 3650 days / 5 days per re
         writeToCSV(satData_latest)
         writeToCSV(satData)
 
-        notify(0, len(satData))
+        notify(0, len(satData) + len(satData_latest), i)
         log(f"Successful Cycle\n{t}\n")
     except Exception as e:
         notify(3)
