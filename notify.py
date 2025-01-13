@@ -20,22 +20,27 @@ def log(data, fileCode = 0):
     with open(filepath, "a") as file:
         file.write(f"{data}\n")
 
-def notify(code:int, records = 0, step:int = 0):
+def notify(code:int, e, records = 0, step:int = 0):
     try:
         msg = MIMEMultipart()
         msg['From'] = email
         msg['To'] = email
-        msg.attach(MIMEText(f"Gathered n = {records} records", 'plain')) #body
 
         match code:
             case 0:
                 msg['subject'] = f"API request successful. #{step+1}/730"
+                body = f"Gathered n = {records} records"
             case 1:
                 msg['subject'] = f"FAILED TO AUTHORIZE #{step+1}/730"
+                body = f"ERROR: {e}"
             case 2:
                 msg['subject'] = f"FAILED TO FETCH DATA #{step+1}/730"
+                body = f"ERROR: {e}"
             case 3:
                 msg['subject'] = f"FAILED TO WRITE DATA TO CSV #{step+1}/730"
+                body = f"ERROR: {e}"
+        
+        msg.attach(MIMEText(body, 'plain'))
 
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()  #encrypts the connection

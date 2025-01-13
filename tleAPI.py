@@ -45,16 +45,17 @@ def writeToCSV(satData):
             file.write(csv+"\n")
 
 def queryAPI(url, session):
-    response = session.get(url)
-    if response.status_code == 200:
-        satData = response.json()  
-        log(f"Received {len(satData)} records")
-        return satData
-    else:
-        notify(2)
-        log(f"Failed API Request\nERROR: {response.status_code}\n")
-        t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())) 
-        log(t, 1)
+    for attempt in range(3): #retries up to 3 times, 5 minutes apart
+        response = session.get(url)
+        if response.status_code == 200:
+            satData = response.json()  
+            log(f"Received {len(satData)} records")
+            return satData
+        else: time.sleep(300)
+    notify(2, e = response.status_code()) #will only run if the above fails
+    log(f"Failed API Request to {url}\nERROR: {response.status_code}\n")
+    t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())) 
+    log(t, 1)
 
 for i in range(730): # 365 days * 10 (years of data) = 3650 days / 5 days per request = 730 requests | Ignoring leap years
     session = login()
@@ -80,10 +81,10 @@ for i in range(730): # 365 days * 10 (years of data) = 3650 days / 5 days per re
         writeToCSV(satData_latest)
         writeToCSV(satData)
 
-        notify(0, len(satData) + len(satData_latest), i)
+        notify(0, records = len(satData) + len(satData_latest), step = i)
         log(f"Successful Cycle\n{t}\n")
     except Exception as e:
-        notify(3)
+        notify(3, e, step=i)
         log(f"Failed to write data\n{t}\nError: {e}\n")
         log(t, 1)
         exit()
