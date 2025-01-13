@@ -10,11 +10,17 @@ load_dotenv()
 email = os.environ.get("EMAIL")
 password = os.environ.get("APP_PASSWORD")
 
-def log(text:str):
-    with open("logs.txt", "w") as file:
-        file.write(text)
+def log(data, fileCode = 0):
+    match fileCode:
+        case 0:
+            filepath = "data/logs.txt"
+        case 1:
+            filepath = "data/time.txt"
 
-def notify(code:int, t:str, records = 0):
+    with open(filepath, "a") as file:
+        file.write(f"{data}\n")
+
+def notify(code:int, records = 0):
     try:
         msg = MIMEMultipart()
         msg['From'] = email
@@ -37,4 +43,5 @@ def notify(code:int, t:str, records = 0):
             server.send_message(msg)
 
     except Exception as e:
+        t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())) 
         log(f"Failed to send email\n{t}\nERROR:\n{e}\n")

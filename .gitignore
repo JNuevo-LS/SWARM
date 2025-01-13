@@ -1,4 +1,5 @@
 data/
 .env
 .csv
-tleapiscript.tar
+tlescript.tar
+__pycache__/
