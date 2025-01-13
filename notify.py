@@ -10,14 +10,8 @@ load_dotenv()
 email = os.environ.get("EMAIL")
 password = os.environ.get("APP_PASSWORD")
 
-def log(data, fileCode = 0):
-    match fileCode:
-        case 0:
-            filepath = "data/logs.txt"
-        case 1:
-            filepath = "data/time.txt"
-
-    with open(filepath, "a") as file:
+def log(data):
+    with open("data/logs.txt", "a") as file:
         file.write(f"{data}\n")
 
 def notify(code:int, e, records = 0, step:int = 0):

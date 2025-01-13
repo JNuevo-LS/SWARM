@@ -31,7 +31,6 @@ def login():
         t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time()))
         notify(1)
         log(f"Failed to Authorize\n{t}\nERROR: {e}\n")
-        log(t, 1) #Logs time in case of failure, to make restarting easier
 
 def writeToCSV(satData):
     with open("data/LEO_TLE.csv", "a") as file: #write API response to a csv
@@ -54,8 +53,6 @@ def queryAPI(url, session):
         else: time.sleep(300)
     notify(2, e = response.status_code()) #will only run if the above fails
     log(f"Failed API Request to {url}\nERROR: {response.status_code}\n")
-    t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())) 
-    log(t, 1)
 
 for i in range(730): # 365 days * 10 (years of data) = 3650 days / 5 days per request = 730 requests | Ignoring leap years
     session = login()
@@ -86,7 +83,6 @@ for i in range(730): # 365 days * 10 (years of data) = 3650 days / 5 days per re
     except Exception as e:
         notify(3, e, step=i)
         log(f"Failed to write data\n{t}\nError: {e}\n")
-        log(t, 1)
         exit()
     
     sleepTime = (random.random() * 1800) + 3600
