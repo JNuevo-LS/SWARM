@@ -7,6 +7,7 @@ ADD .env ./
 ADD readData.py ./
 ADD tleAPI.py ./
 ADD notify.py ./
+ADD storage.py ./
 
 RUN pip install --no-cache-dir -r requirements.txt
 

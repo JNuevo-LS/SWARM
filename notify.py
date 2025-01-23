@@ -3,6 +3,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import time
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,7 +15,7 @@ def log(data):
     with open("data/logs.txt", "a") as file:
         file.write(f"{data}\n")
 
-def notify(code:int, e, records = 0, step:int = 0):
+def notify(code:int, e = "", records = 0, step:int = 0):
     try:
         msg = MIMEMultipart()
         msg['From'] = email
@@ -43,4 +44,4 @@ def notify(code:int, e, records = 0, step:int = 0):
 
     except Exception as e:
         t = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time())) 
-        log(f"Failed to send email\n{t}\nERROR:\n{e}\n")
+        logging.error(f"Failed to send email\n{t}\nERROR:\n{e}\n")
