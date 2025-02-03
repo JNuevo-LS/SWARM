@@ -5,3 +5,4 @@ tlescript.tar
 test.py
 tleapi.log
 __pycache__/
+rust_leo_sim/target/
