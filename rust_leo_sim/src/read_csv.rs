@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Lines, Error};
-struct Satellite {
+
+pub struct Satellite {
     name: String,
     satellite_catalog_number: u32,
     security_class:char,
@@ -18,20 +19,21 @@ struct Satellite {
     mean_motion:f64
 }
 
-pub fn read_csv(file_path: &str) -> Result<(), Error> {
+pub fn read_csv(file_path: &str) -> Result<Vec<Satellite>, Error> {
     let file: File = File::open(file_path)?;
     let reader: BufReader<File> = BufReader::new(file);
     
     let mut lines: Lines<BufReader<File>> = reader.lines();
-    if let Some(header) = lines.next() {
-        println!("Header: {}", header?)
-    }
+    lines.next(); //skip header
+
+    let mut satellites: Vec<Satellite> = Vec::new();
 
     for line in lines {
         let line: String = line?;
-        let split: Vec<&str> = line.split(",").collect();
-        
-        let _satellite: Satellite = Satellite {
+        if line.len() > 0 {
+            let split: Vec<&str> = line.split(",").collect();
+            
+            let satellite: Satellite = Satellite {
                 name: split[0].to_string(),
                 satellite_catalog_number: split[1].trim().parse::<u32>().unwrap(),
                 security_class: split[2].chars().next().unwrap(),
@@ -47,11 +49,13 @@ pub fn read_csv(file_path: &str) -> Result<(), Error> {
                 perigee: split[12].parse::<f64>().unwrap(),
                 mean_anomaly: split[13].parse::<f64>().unwrap(),
                 mean_motion: split[14].parse::<f64>().unwrap()
-        };
+            };
+            satellites.push(satellite);
+        }
     }
     
     println!("Successfully read everything");
 
-    Ok(())
+    Ok(satellites)
 }
 
