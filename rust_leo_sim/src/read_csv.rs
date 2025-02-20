@@ -1,31 +1,18 @@
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Error, Lines};
-#[derive(Clone)]
-pub struct Satellite {
-    pub name: String,
-    pub catalog_number: u32,
-    pub security_class:char,
-    pub international_designator:String,
-    pub epoch:String,
-    pub first_time_derivative:f64,
-    pub second_time_derivative:f64,
-    pub drag:f64,
-    pub inclination:f64,
-    pub raan:f64,
-    pub eccentricity:f64,
-    pub perigee:f64,
-    pub mean_anomaly:f64,
-    pub mean_motion:f64
-}
+use std::io::{BufRead, BufReader, Lines};
+use std::collections::HashMap;
+use crate::satellite::{OrbitalInstance, SatelliteRecord};
+use sgp4::chrono::NaiveDateTime;
+use anyhow::{bail, Result};
 
-pub fn read_csv(file_path: &str) -> Result<Vec<Satellite>, Error> {
+pub fn read_csv(file_path: &str) -> Result<HashMap<String, SatelliteRecord>> {
     let file: File = File::open(file_path)?;
     let reader: BufReader<File> = BufReader::new(file);
     
     let mut lines: Lines<BufReader<File>> = reader.lines();
     lines.next(); //skip header
 
-    let mut satellites: Vec<Satellite> = Vec::new();
+    let mut satellites: HashMap<String, SatelliteRecord> = HashMap::new();
 
     for line in lines {
         let line: String = line?;
@@ -35,24 +22,38 @@ pub fn read_csv(file_path: &str) -> Result<Vec<Satellite>, Error> {
             let year = split[4].parse::<u16>().unwrap();
             let day = split[5].parse::<f64>().unwrap();
             let dt = format_datetime(year, day)?;
-            
-            let satellite: Satellite = Satellite {
-                name: split[0].to_string(),
-                catalog_number: split[1].trim().parse::<u32>().unwrap(),
-                security_class: split[2].chars().next().unwrap(),
-                international_designator: split[3].to_string(),
-                epoch: dt,
-                first_time_derivative: split[6].parse::<f64>().unwrap(),
-                second_time_derivative: split[7].parse::<f64>().unwrap(),
-                drag: split[8].parse::<f64>().unwrap(),
-                inclination: split[9].parse::<f64>().unwrap(),
-                raan: split[10].parse::<f64>().unwrap(),
-                eccentricity: split[11].parse::<f64>().unwrap(),
-                perigee: split[12].parse::<f64>().unwrap(),
-                mean_anomaly: split[13].parse::<f64>().unwrap(),
-                mean_motion: split[14].parse::<f64>().unwrap()
-            };
-            satellites.push(satellite);
+
+            let international_designator: String = split[3].to_string();
+
+            let instance: OrbitalInstance = OrbitalInstance { //creates an instance of the satellite's orbital data including time
+                    epoch:dt,
+                    first_time_derivative: split[6].parse::<f64>().unwrap(),
+                    second_time_derivative: split[7].parse::<f64>().unwrap(),
+                    drag: split[8].parse::<f64>().unwrap(),
+                    inclination: split[9].parse::<f64>().unwrap(),
+                    raan: split[10].parse::<f64>().unwrap(),
+                    eccentricity: split[11].parse::<f64>().unwrap(),
+                    perigee: split[12].parse::<f64>().unwrap(),
+                    mean_anomaly: split[13].parse::<f64>().unwrap(),
+                    mean_motion: split[14].parse::<f64>().unwrap(),
+                    revolution_number: split[15].parse::<u32>().unwrap()
+                };
+
+            if satellites.contains_key(&international_designator) {
+                satellites.get_mut(&international_designator).unwrap().orbital_records.push(instance) //pushes the satellite's instance to the SatelliteRecords struct
+            } else { //if satellite hasn't been recorded yet, creates a record of it and initializes a new vector of orbital instances
+                let orbital_records:Vec<OrbitalInstance> =  Vec::new();
+
+                let satellite_record = SatelliteRecord {
+                    name: split[0].to_string(),
+                    catalog_number: split[1].trim().parse::<u32>().unwrap(),
+                    security_class: split[2].chars().next().unwrap(),
+                    international_designator: split[3].to_string(),
+                    orbital_records: orbital_records
+                };
+
+                satellites.insert(international_designator, satellite_record);
+            }
         }
     }
     
@@ -61,69 +62,66 @@ pub fn read_csv(file_path: &str) -> Result<Vec<Satellite>, Error> {
     Ok(satellites)
 }
 
-fn format_datetime(year:u16, day:f64) -> Result<String, Error> {
+fn format_datetime(year:u16, day:f64) -> Result<String> {
     let year = year+2000;
     let leap_year = is_leap_year(year);
     let (month, day_string) = find_month_and_day(day, leap_year)?;
-    let hour = (day*24.0)%24.0;
-    let minute = (day*24.0*60.0)%60.0;
-    let second = (day*24.0*60.0*60.0)%100.0;
-    let dt = format!("{year}-{month}-{day_string}T{hour:.0}:{minute:.0}:{second:.6}");
+    let hour = (day*24.0) as u32 % 24;
+    let minute = ((day*24.0*60.0)%60.0).floor() as u32;
+    let second = (day*24.0*60.0*60.0)%60.0;
+    let dt = format!("{year:04}-{month:02}-{day_string}T{hour:02.0}:{minute:02.0}:{second:09.6}");
     Ok(dt)
-
 }
+
+pub fn hour_difference_between_epochs(datetime1:&String, datetime2:&String) -> Result<u32> {
+    let seconds_dt1 = parse_datetime(datetime1)?;
+    let seconds_dt2 = parse_datetime(datetime2)?;
+    if seconds_dt1 > seconds_dt2 { //makes sure output is never negative
+        Ok((seconds_dt1 - seconds_dt2) / 3600)
+    } else {
+        Ok((seconds_dt2 - seconds_dt1) / 3600)
+    }
+}
+
+fn parse_datetime(datetime: &String) -> Result<u32> {
+    let naive_dt = NaiveDateTime::parse_from_str(datetime, "%Y-%m-%dT%H:%M:%S%.6f")?;
+    Ok(naive_dt.and_utc().timestamp() as u32)
+}
+
 
 fn is_leap_year(year: u16) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
-fn find_month_and_day(mut day:f64, leap_year:bool) -> Result<(String, String), Error> {
-    if leap_year && day > 61.0 {
-        day = day-1.0; //makes it easier to deal with leap years after february
+fn find_month_and_day(day:f64, leap_year:bool) -> Result<(String, String)> {
+    let months: [u16; 12] = if leap_year {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+
+    let mut day_int: u16  = day.floor() as u16;
+
+
+    let max_day: u16 = if leap_year {367} else {366};
+    if day_int > max_day {
+            bail!("Day {} is outside of range {}", day, max_day);
+        }
+    
+
+    let mut month_index: u8 = 1;
+
+    for &days_in_month in &months {
+        if day_int <= days_in_month {
+            break;
+        } else {
+            day_int -= days_in_month;
+            month_index += 1;
+        }
     }
 
-    let month: String;
-    if day < 31.0 {
-        month = String::from("01");
-    } else if (leap_year == true && day < 60.0) || (leap_year == false && day < 59.0 ){
-        month = String::from("02");
-        day -= 31.0;
-    } else if day < 90.0 {
-        month = String::from("03");
-        day -= 59.0;
-    } else if day < 120.0 {
-        month = String::from("04");
-        day -= 90.0;
-    } else if day < 151.0 {
-        month = String::from("05");
-        day -= 120.0;
-    } else if day < 181.0 {
-        month = String::from("06");
-        day -= 151.0;
-    } else if day < 212.0 {
-        month = String::from("07");
-        day -= 181.0;
-    } else if day < 243.0 {
-        month =String::from("08");
-        day -= 212.0;
-    } else if day < 273.0 {
-        month = String::from("09");
-        day -= 243.0;
-    } else if day < 304.0 {
-        month =String::from("10");
-        day -= 273.0;
-    } else if day < 334.0 {
-        month = String::from("11");
-        day -= 304.0;
-    } else if day < 366.0 {
-        month = String::from("12");
-        day -= 334.0;
-    }
-     else {
-        println!("{}", day);
-        return Err(Error::new(io::ErrorKind::Other, "Day outside of expected range"));
-    }
-    let day_string: String = String::from(format!("{}", day.floor()));
-    let date: (String, String) = (month, day_string);
-    Ok(date)
+    let month_string = String::from(format!("{:02}", month_index));
+    let day_string = String::from(format!("{:02}", day_int));
+    Ok((month_string, day_string))
+
 }

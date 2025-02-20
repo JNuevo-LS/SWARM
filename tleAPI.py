@@ -7,6 +7,7 @@ import random
 from dotenv import load_dotenv
 from readData import createSatObj
 from storage import uploadFile
+from ratelimit import sleep_and_retry, limits
 # from notify import notify, log
 
 load_dotenv() #Access .env login from your own account
@@ -51,7 +52,7 @@ def writeToCSV(satData, filePath):
             empty = False
         with open(filePath, "a") as file: #write API response to a csv
             if empty:
-                file.write("name,satelliteCatalogNumber,securityClass,internationalDesignator,year,day,firstTimeDerivative,secondTimeDerivative,drag,inclination,RAAN,eccentricity,perigee,meanAnomaly,meanMotion\n")
+                file.write("name,satelliteCatalogNumber,securityClass,internationalDesignator,year,day,firstTimeDerivative,secondTimeDerivative,drag,inclination,RAAN,eccentricity,perigee,meanAnomaly,meanMotion,revolutionNumber\n")
             for satellite in satData:
                 tle1 = satellite["TLE_LINE1"]
                 tle2 = satellite["TLE_LINE2"]
@@ -62,20 +63,19 @@ def writeToCSV(satData, filePath):
         logging.critical(f"Failed to Write: {e}")
         raise RuntimeError(f"Failed to Write: {e}")
 
-def checkAndUpload(filePath:str, forced:bool = False):
+def checkFileSize(filePath:str):
     if not os.path.exists(filePath):
         return False
     else:
         size = os.stat(filePath).st_size
         gib = size / 1073741824
         logging.info(f"Checking {filePath} size: {gib} GiB")
-        if gib >= 1 or forced:
-            uploadFile(filePath, filePath, bucket)
-            os.remove(filePath)
-            logging.info(f"Deleted {filePath}")
+        if gib >= 1:
             return True
         else: return False
 
+@sleep_and_retry
+@limits(calls=30, period=60)
 def queryAPI(url, session):
     for attempt in range(5):  # retries up to 5 times
         try:
@@ -107,9 +107,10 @@ def main():
     batchCount = 1
     satData = []
     day = 86400 #seconds in a day
-    for i in range(1827): #20 years of data = 7305 days / 4 days per request = 1827 requests
+    maxRange = 1827
+    for i in range(maxRange): #20 years of data = 7305 days / 4 days per request = 1827 requests
         if i == 0:
-            seconds = 1735689600 #2024-12-31
+            seconds = 1735689600 #2024-12-31 = 1735689600
             endSeconds = seconds - (day * 4) # 4 days before
 
         start = time.strftime('%Y-%m-%d', time.localtime(seconds))
@@ -119,23 +120,26 @@ def main():
         url = f"https://www.space-track.org/basicspacedata/query/class/tle/EPOCH/{end}--{start}/ECCENTRICITY/%3C0.25/MEAN_MOTION/%3E11.25"
         satData.extend(queryAPI(url, session))
         
-        if (i+1) % 12 == 0: #process in batches only - constraint 
+        if (i+1) % 8 == 0: #process in batches only - constraint 
             filePath = f"data/TLE_LEO.{batchCount}.csv" #default filename
-            if checkAndUpload(filePath):
+            if checkFileSize(filePath):
+                uploadFile(filePath, filePath, bucket)
+                # os.remove(filePath)
+                logging.info(f"Deleted {filePath}")
                 batchCount += 1
                 filePath = f"data/TLE_LEO.{batchCount}.csv"
             writeToCSV(satData, filePath)
             satData.clear()
-        if i+1 == 1827:
+        if i+1 == maxRange:
             writeToCSV(satData, filePath) #write final request to csv
-            checkAndUpload(filePath, forced=True) #force upload final file
+            # checkAndUpload(filePath, forced=True) #force upload final file
+            uploadFile(filePath, filePath, bucket)
             satData.clear()
             logging.info("TASK COMPLETED SUCCESSFULLY. EXITING PROGRAM.")
-
             break
 
         # notify(0, records = len(satData) + len(satData_latest), step = i)
-        logging.info(f"Successful Cycle {i+1}/1827")
+        logging.info(f"Successful Cycle {i+1}/{maxRange}")
 
 if __name__ == "__main__":
     main()

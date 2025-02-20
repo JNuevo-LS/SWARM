@@ -23,22 +23,43 @@ class Satellite:
          raise KeyError(f"{key} not found in Satellite object.")
       
    def formatCSV(self):
-      csv = f'"{self.name}"'
+      csv = f'{self.name}'
       for value in (*self.metadata.values(), *self.orbitals.values()):
          csv += "," + str(value)
       return csv
    
-def convert_scientific(value):
-    value = value.strip() 
+def convert_scientific(value:str) -> float:
+    def addUp(string:str, start_i:int ,end_shift:int):
+        i = start_i
+        n = 0
+        while i < len(string) - end_shift:
+            n *= 10
+            if string[i].isnumeric(): n += int(string[i])
+            i+=1
+        return n
+
     try:
-      if value in ["+00000+0", "00000+0", "-00000+0", "00000-0", "+00000-0", "-00000-0", "0"]:
-         return 0.0  #convert to actual zero
-      if re.match(r"^[+-]?\d+([+-]\d+)?$", value):  #matches '49332-4', '+12345+3'
-         return float(value[:-2] + "e" + value[-2:])
-      return float(value)
+        value = value.strip()
+        numeric_value = 0
+        negative = False
+        if value[0] == '-':
+            if value[-3] == 'e':
+                numeric_value = addUp(value, 1, 3)
+            else:
+                numeric_value = addUp(value, 1, 2)
+        else:
+            if value[-3] == 'e':
+                numeric_value = addUp(value, 0, 3)
+            else:
+                numeric_value = addUp(value, 0, 2)
+    
+        if negative: 
+            return float(f"-0.{numeric_value}e{value[-2:]}")
+        else:
+            return float(f"0.{numeric_value}e{value[-2:]}")
+
     except Exception as e:
-      logging.error(f"Unexpected scientific notation format: '{value}'")
-      raise ValueError
+        raise ValueError
 
 def parseObjData(metadata: str, orbitals: str):
    try:
@@ -49,9 +70,9 @@ def parseObjData(metadata: str, orbitals: str):
          "internationalDesignator": metadata[9:17].strip(),
          "year": int(metadata[18:20].strip()),
          "day": float(metadata[20:33]),
-         "firstTimeDerivative": convert_scientific(metadata[33:44]),
+         "firstTimeDerivative": float(metadata[33:44]),
          "secondTimeDerivative": convert_scientific(metadata[44:52]),
-         "drag": convert_scientific(metadata[54:62])
+         "drag": convert_scientific(metadata[54:62]),
          }
 
       #orbital elements
@@ -61,7 +82,8 @@ def parseObjData(metadata: str, orbitals: str):
          "eccentricity": f"0.{orbitals[26:33]}",
          "perigee": float(orbitals[34:42]),
          "meanAnomaly": float(orbitals[43:51]),
-         "meanMotion": convert_scientific(orbitals[52:63]),
+         "meanMotion": float(orbitals[52:63]),
+         "revolutionNumber": int(orbitals[63:68])
       }
       return (metadata, orbitals)
    except Exception as e:
