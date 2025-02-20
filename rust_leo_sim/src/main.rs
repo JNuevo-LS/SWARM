@@ -52,7 +52,8 @@ fn main() {
             println!("Calculating time");
             let time: u32 = read_csv::hour_difference_between_epochs(&current.epoch, &next.epoch).unwrap();
             println!("Propagating {time} hours");
-            let _propagation = propagate_elements(current, time);
+            let propagation = propagate_elements(&satellite_record.name, &satellite_record.international_designator, &satellite_record.catalog_number, current, time).unwrap();
+            println!("Len of propagation: {}", propagation.len())
         }
     }
     

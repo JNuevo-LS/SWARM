@@ -35,7 +35,8 @@ pub fn read_csv(file_path: &str) -> Result<HashMap<String, SatelliteRecord>> {
                     eccentricity: split[11].parse::<f64>().unwrap(),
                     perigee: split[12].parse::<f64>().unwrap(),
                     mean_anomaly: split[13].parse::<f64>().unwrap(),
-                    mean_motion: split[14].parse::<f64>().unwrap()
+                    mean_motion: split[14].parse::<f64>().unwrap(),
+                    revolution_number: split[15].parse::<u32>().unwrap()
                 };
 
             if satellites.contains_key(&international_designator) {

@@ -18,5 +18,6 @@ pub struct OrbitalInstance {
     pub eccentricity:f64,
     pub perigee:f64,
     pub mean_anomaly:f64,
-    pub mean_motion:f64
+    pub mean_motion:f64,
+    pub revolution_number:u32
 }

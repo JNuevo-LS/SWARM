@@ -7,3 +7,4 @@ tleapi.log
 __pycache__/
 rust_leo_sim/target/
 rust_leo_sim/data/
+analysis.ipynb
