@@ -80,8 +80,8 @@ def queryAPI(url, session):
     for attempt in range(5):  # retries up to 5 times
         try:
             response = session.get(url)
-            if response.status_code == 200:
-                satData = response.json()
+            satData = response.json()
+            if response.status_code == 200 and len(satData) > 1:
                 logging.info(f"Received {len(satData)} records from {url}")
                 return satData
             elif response.status_code in [265, 401, 403]:  # Unauthorized or Forbidden
@@ -113,6 +113,8 @@ def main():
             seconds = 1735689600 #2024-12-31 = 1735689600
             endSeconds = seconds - (day * 4) # 4 days before
 
+        logging.info(f"Seconds: {seconds}")
+
         start = time.strftime('%Y-%m-%d', time.localtime(seconds))
         end = time.strftime('%Y-%m-%d', time.localtime(endSeconds))
         seconds, endSeconds = endSeconds-day, endSeconds-(day * 5)
@@ -120,7 +122,7 @@ def main():
         url = f"https://www.space-track.org/basicspacedata/query/class/tle/EPOCH/{end}--{start}/ECCENTRICITY/%3C0.25/MEAN_MOTION/%3E11.25"
         satData.extend(queryAPI(url, session))
         
-        if (i+1) % 8 == 0: #process in batches only - constraint 
+        if (i+1) % 10 == 0: #process in batches only - constraint 
             filePath = f"data/TLE_LEO.{batchCount}.csv" #default filename
             if checkFileSize(filePath):
                 uploadFile(filePath, filePath, bucket)

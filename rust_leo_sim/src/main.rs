@@ -8,7 +8,6 @@ use std::time::Instant;
 use propagate::propagate_elements;
 use satellite::SatelliteRecord;
 use anyhow::Result;
-
 fn main() {
 
     let mut handles = vec![];
@@ -41,20 +40,12 @@ fn main() {
         println!("Merged with a thread, new size: {}", satellites.len())
     }
 
-    
     for (_id, satellite_record) in satellites {
         println!("Found {} records for {}", satellite_record.orbital_records.len(), satellite_record.international_designator);
-        for window in satellite_record.orbital_records.windows(2).rev() { //iterates in reverse order (which comes out to be chronological order)
-            let current = &window[0];
-            println!("Current: {}", current.epoch);
-            let next = &window[1];
-            println!("Next: {}", next.epoch);
-            println!("Calculating time");
-            let time: u32 = read_csv::hour_difference_between_epochs(&current.epoch, &next.epoch).unwrap();
-            println!("Propagating {time} hours");
-            let propagation = propagate_elements(&satellite_record.name, &satellite_record.international_designator, &satellite_record.catalog_number, current, time).unwrap();
-            println!("Len of propagation: {}", propagation.len())
+        for current in satellite_record.orbital_records.into_iter().rev() { //iterates in reverse order (which comes out to be chronological order)
+            let _propagation = propagate_elements(&satellite_record.name, &satellite_record.international_designator, &satellite_record.catalog_number, &current).unwrap();
         }
+        println!("Finished propagating {}", satellite_record.international_designator)
     }
     
 }
