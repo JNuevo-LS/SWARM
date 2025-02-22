@@ -1,33 +1,29 @@
-pub mod read_csv;
+pub mod read;
 pub mod propagate;
 pub mod merge;
 pub mod satellite;
 use std::collections::HashMap;
 use std::thread;
 use std::time::Instant;
-use propagate::propagate_elements;
+use pyo3::prelude::*;
+use pyo3::types::PyModule;
 use satellite::SatelliteRecord;
 use anyhow::Result;
-
 fn main() {
+
+    pyo3::prepare_freethreaded_python();
 
     let mut handles = vec![];
 
     for i in 1..2{
         let handle = thread::spawn(move || -> Result<HashMap<String, SatelliteRecord>> { //creates a thread for each CSV file
-            let filepath: String = format!("./data/TLE_LEO.{i}.csv");
+            let filepath: String = format!("./data/tle2006.txt");
             let time: Instant = Instant::now();
-            let satellites: HashMap<String, SatelliteRecord> = read_csv::read_csv(&filepath).expect("Failed to read CSV");
+            println!("[{i}] Now reading");
+            let satellites: HashMap<String, SatelliteRecord> = read::read_txt(&filepath).expect("Failed to read CSV");
             println!("[{i}] Reading is done");
             println!("[{i}] Read in {} seconds", time.elapsed().as_secs_f64());
             println!("[{i}] Size of satellites = {}", satellites.len());
-            let time = Instant::now();
-
-
-            let total: f64 = time.elapsed().as_secs_f64();
-            println!("[{i}] Total Time Spent: {}", total);
-            // let average: f64 = total/satellites.len() as f64;
-            // println!("[{i}] Average Time per Item: {}", average);
             Ok(satellites)
 
         });
@@ -41,20 +37,25 @@ fn main() {
         println!("Merged with a thread, new size: {}", satellites.len())
     }
 
-    
-    for (_id, satellite_record) in satellites {
-        println!("Found {} records for {}", satellite_record.orbital_records.len(), satellite_record.international_designator);
-        for window in satellite_record.orbital_records.windows(2).rev() { //iterates in reverse order (which comes out to be chronological order)
-            let current = &window[0];
-            println!("Current: {}", current.epoch);
-            let next = &window[1];
-            println!("Next: {}", next.epoch);
-            println!("Calculating time");
-            let time: u32 = read_csv::hour_difference_between_epochs(&current.epoch, &next.epoch).unwrap();
-            println!("Propagating {time} hours");
-            let propagation = propagate_elements(&satellite_record.name, &satellite_record.international_designator, &satellite_record.catalog_number, current, time).unwrap();
-            println!("Len of propagation: {}", propagation.len())
+    Python::with_gil(|py| {
+        let sys = py.import("sys").expect("Couldn't import sys");
+        let path = sys.getattr("path").unwrap();
+        let path = path.downcast::<pyo3::types::PyList>().unwrap();
+        path.insert(0, "./python").unwrap();
+
+        let my_script = PyModule::import(py, "propagate").expect("Failed to import module");
+        
+        let time = Instant::now();
+        for (id, satellite_record) in satellites {
+            println!("Processing {}", id);
+            let satellite_record_py = satellite_record.to_python(py);
+
+            let simulate = my_script.getattr("propagate_between_gaps").expect("Failed to get 'propagate_between_gaps'");
+            println!("Processing records into Python CustomTLE Object");
+            println!("Simulating Orbits");
+            let _sim_result = simulate.call1((satellite_record_py, 10000)).expect("Failed to simulate orbits");
         }
-    }
+        println!("Processed in {} seconds total", time.elapsed().as_secs_f64());
+    });
     
 }
