@@ -1,5 +1,4 @@
 pub mod read;
-pub mod propagate;
 pub mod merge;
 pub mod satellite;
 use std::collections::HashMap;
@@ -15,9 +14,9 @@ fn main() {
 
     let mut handles = vec![];
 
-    for i in 1..2{
+    for i in 0..2{
         let handle = thread::spawn(move || -> Result<HashMap<String, SatelliteRecord>> { //creates a thread for each CSV file
-            let filepath: String = format!("./data/tle2006.txt");
+            let filepath: String = format!("./data/tle200{}.txt", 6 + i);
             let time: Instant = Instant::now();
             println!("[{i}] Now reading");
             let satellites: HashMap<String, SatelliteRecord> = read::read_txt(&filepath).expect("Failed to read CSV");
@@ -30,6 +29,7 @@ fn main() {
         handles.push(handle);
     }
 
+    //combine all satellite hashmaps from each year into one
     let mut satellites: HashMap<String, SatelliteRecord> = HashMap::new();
     for handle in handles {
         let thread_maps = handle.join().unwrap().unwrap();
@@ -37,6 +37,7 @@ fn main() {
         println!("Merged with a thread, new size: {}", satellites.len())
     }
 
+    //now we process and propagate that data
     Python::with_gil(|py| {
         let sys = py.import("sys").expect("Couldn't import sys");
         let path = sys.getattr("path").unwrap();
