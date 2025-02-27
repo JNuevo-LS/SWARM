@@ -1,6 +1,6 @@
 import numpy
 import torch
-from dsgp4.tle import CustomTLE
+from CustomTLE import CustomTLE
 
 #@torch.jit.script
 def sgp4(satellite, tsince):

@@ -1,57 +1,33 @@
-use sgp4::{self, Constants, Elements, Prediction};
-use serde_json;
-use crate::satellite::OrbitalInstance;
-use anyhow::Result;
+use pyo3::prelude::*;
+use rayon::prelude::*;
+use std::{collections::HashMap, time::Instant};
+use crate::satellite::SatelliteRecord;
 
-//No longer used since we moved to MLDSGP4 - saved just in case
-
-pub fn propagate_elements(name:&String, id:&String, catalog_number:&u32, instance: &OrbitalInstance) -> Result<Prediction> {
-    // let _mu: f64 = 398600.4418;
-    let elements = format_elements(name, id, catalog_number, instance)?;
-    let constants: Constants = sgp4::Constants::from_elements(&elements)?;
-
-    let prediction: Prediction = constants.propagate(sgp4::MinutesSinceEpoch(0.0))?;
-    Ok(prediction)
+pub(crate) fn propagate_satellites(satellites: HashMap<String, SatelliteRecord>) { 
+    Python::with_gil(|outer_py|{
+        let _ = outer_py.allow_threads(|| {
+            satellites.par_iter().for_each(|(id, satellite_record)| {
+                simulate(id, satellite_record);
+            });
+        });
+    })
 }
 
-fn format_elements(name:&String, id:&String, catalog_number:&u32, instance: &OrbitalInstance) -> Result<Elements>{
-    let ecc_unsafe = instance.eccentricity < 0.0;
-    let elements: String = format!(
-        r#"{{
-            "OBJECT_NAME": "{}",
-            "OBJECT_ID": "{}",
-            "EPOCH": "{}",
-            "MEAN_MOTION": {},
-            "ECCENTRICITY": {},
-            "INCLINATION": {},
-            "RA_OF_ASC_NODE": {},
-            "ARG_OF_PERICENTER": {},
-            "MEAN_ANOMALY": {},
-            "EPHEMERIS_TYPE": 0,
-            "CLASSIFICATION_TYPE": "U",
-            "NORAD_CAT_ID": {},
-            "ELEMENT_SET_NO": 999,
-            "REV_AT_EPOCH": {},
-            "BSTAR": {},
-            "MEAN_MOTION_DOT": {},
-            "MEAN_MOTION_DDOT": {}
-        }}"#,
-        name,
-        id,
-        instance.epoch,
-        instance.mean_motion,
-        if ecc_unsafe {0.0} else {instance.eccentricity},
-        instance.inclination,
-        instance.raan,
-        instance.perigee,
-        instance.mean_anomaly,
-        catalog_number,
-        instance.revolution_number,
-        instance.drag,
-        instance.first_time_derivative,
-        instance.second_time_derivative
-    );
-    
-    let elements: Elements  = serde_json::from_str(elements.as_str())?;
-    Ok(elements)
+fn simulate(id: &String, satellite_record: &SatelliteRecord) {
+    Python::with_gil(|py| {
+        let sys = py.import("sys").expect("Couldn't import sys");
+        let path = sys.getattr("path").unwrap();
+        let path = path.downcast::<pyo3::types::PyList>().unwrap();
+        path.insert(0, "./python").unwrap();
+
+        let propagate_py = PyModule::import(py, "propagate").expect("Failed to import module");
+        let satellite_record_py = satellite_record.to_python(py);
+        
+        // let model = start_up_model.call0().expect("Failed to start up ml_dsgp4 model");
+        let simulator = propagate_py.getattr("propagate_between_gaps").expect("Failed to get 'propagate_between_gaps'");
+        println!("[{id}] Simulating Orbits");
+        let time = Instant::now();
+        let _sim_result = simulator.call1((satellite_record_py, 10000)).expect("Failed to simulate orbits");
+        println!("[{id} Finished simulating orbits in {}", time.elapsed().as_secs_f64())
+    });
 }
