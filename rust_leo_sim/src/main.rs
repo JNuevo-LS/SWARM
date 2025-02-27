@@ -10,7 +10,8 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() > 1 {
         if args[1] == "n" { //key for numerical integration for now
-            let _satellites = read::read_txt_for_satkit("./data/tle2006.txt");
+            let satellites = read::read_txt_for_satkit("./data/tle2006.txt").unwrap();
+            let _sim_result = numerical_integration::integrate(satellites);
         }
     } else { //defaults to reading and propagating
         pyo3::prepare_freethreaded_python();
