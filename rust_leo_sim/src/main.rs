@@ -11,7 +11,7 @@ fn main() {
     if args.len() > 1 {
         if args[1] == "n" { //key for numerical integration for now
             let satellites = read::read_txt_for_satkit("./data/tle2006.txt").unwrap();
-            let _sim_result = numerical_integration::integrate(satellites);
+            let _sim_result = numerical_integration::integrate(satellites, 1000);
         }
     } else { //defaults to reading and propagating
         pyo3::prepare_freethreaded_python();

@@ -110,6 +110,7 @@ pub(crate) fn read_txt_for_satkit(filepath: &str) -> Result<HashMap<String, Vec<
     Ok(satellites)
 }
 
+#[allow(dead_code)]
 fn clean_file<P: AsRef<Path>>(path: P) -> io::Result<()> { //sometimes needed if a file is misformatted
     let content = fs::read_to_string(&path)?;
 
