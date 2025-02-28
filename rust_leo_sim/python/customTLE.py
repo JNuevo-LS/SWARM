@@ -56,13 +56,13 @@ class CustomTLE(TLE):
         #I also add the semi-major axis:
         data['semi_major_axis'] = (MU_EARTH/(data['mean_motion']**2))**(1.0/3.0)
         try:
-            data['epoch'] = datetime.datetime(year, mon, day, hr, minute, int(sec_whole),
+            data['_epoch'] = datetime.datetime(year, mon, day, hr, minute, int(sec_whole),
                                     int(sec_fraction * 1000000.0 // 1.0))
         except ValueError:
             # Sometimes a TLE says something like "2019 + 366.82137887 days"
             # which would be December 32nd which causes a ValueError.
             year, mon, day, hr, minute, sec = util.invjday(data['_jdsatepoch'])
-            data['epoch'] = datetime.datetime(year, mon, day, hr, minute, int(sec_whole),
+            data['_epoch'] = datetime.datetime(year, mon, day, hr, minute, int(sec_whole),
                                     int(sec_fraction * 1000000.0 // 1.0))
         data['_opsmode']=opsmode
         return data
