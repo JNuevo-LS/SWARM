@@ -63,7 +63,7 @@ fn read_txt(filepath: &str) -> Result<HashMap<String, SatelliteRecord>>{
     
                     let satellite_record: SatelliteRecord = SatelliteRecord {
                         catalog_number: line1[2..7].trim().parse::<u32>()?,
-                        international_designator: line1[9..17].to_string(),
+                        international_designator: line1[9..17].trim().to_string(),
                         orbital_records: orbital_records
                     };
                     satellites.insert(id, satellite_record);
@@ -78,7 +78,7 @@ fn read_txt(filepath: &str) -> Result<HashMap<String, SatelliteRecord>>{
     Ok(satellites)
 }
 
-pub(crate) fn read_txt_for_satkit(filepath: &str) -> Result<HashMap<String, Vec<TLE>>> {
+pub(crate) fn read_txt_for_integration(filepath: &str) -> Result<HashMap<String, Vec<TLE>>> {
     let file_as_string = read_to_string(filepath)?.to_string();
     
     let mut lines = file_as_string.lines();
