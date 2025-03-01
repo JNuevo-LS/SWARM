@@ -126,7 +126,6 @@ fn clean_file<P: AsRef<Path>>(path: P) -> io::Result<()> { //sometimes needed if
 }
 
 fn process_tle_instance(line1: &String, line2: &String) -> Result<OrbitalInstance> {
-
     if line1.chars().nth(0) != Some('1') {
         bail!("Line 1 input invalid: {}", line1)
     }  

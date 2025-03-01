@@ -26,8 +26,29 @@ pub(crate) fn integrate(map:HashMap<String, Vec<TLE>>, density:u16) -> Result<Ha
     Ok(time_steps)
 }
 
-pub fn save_time_steps(map: HashMap<String, Vec<SatState>>) -> Result<()> {
-    const MAX_FILE_SIZE:usize = 524_288_000; //500 MB change as needed
+pub(crate) fn integrate_streaming(map: HashMap<String, Vec<TLE>>, density:u16) -> Result<()> { //integration using streaming for lower memory machines
+    println!("Converting to SatStates");
+    let time = std::time::Instant::now();
+    let map: HashMap<String, Vec<SatState>> = convert_map_to_gcrf(map)?;
+    println!("Converted in {}", time.elapsed().as_secs_f64());
+
+    let settings = PropSettings::default();
+    // settings.gravity_order = 8;
+
+    println!("Starting Numerical Integration Process");
+    let time = std::time::Instant::now();
+    let results_map: HashMap<String, Vec<PropagationResult<1>>> = parallel_integrate_between_gaps(map, &settings)?;
+    println!("Integrated in {}", time.elapsed().as_secs_f64());
+
+    println!("Saving all time steps");
+    let _time_steps = parallel_save_time_steps_individual(results_map, density)?;
+    println!("Finished in {}", time.elapsed().as_secs_f64());
+
+    Ok(())
+}
+
+pub fn save_time_steps_map(map: HashMap<String, Vec<SatState>>) -> Result<()> {
+    const MAX_FILE_SIZE:usize = 1_048_576_000; //1 GB change as needed
     let mut current_file_size:usize = 0;
     let mut file_index:usize = 0;
 
@@ -52,7 +73,7 @@ pub fn save_time_steps(map: HashMap<String, Vec<SatState>>) -> Result<()> {
 
     println!("Writing to file now...");
     let time = std::time::Instant::now();
-    for step in combined_steps {
+    for step in combined_steps.into_iter() {
         let formatted_step: String = format_step(step);
         let current_line_size: usize = formatted_step.len();
 
@@ -68,11 +89,54 @@ pub fn save_time_steps(map: HashMap<String, Vec<SatState>>) -> Result<()> {
         } else {
             current_file_size += current_line_size
         }
-
     }
     println!("Finished writing in {}", time.elapsed().as_secs());
     
 
+    Ok(())
+}
+
+fn parallel_save_time_steps_individual(map: HashMap<String, Vec<PropagationResult<1>>>, density:u16) -> Result<()> {
+    map.into_par_iter()
+        .try_for_each(|(id, results)| -> Result<()>{
+            let steps = get_time_steps(results, density)?;
+            save_time_steps_individual(&id, steps)?;
+            Ok(())
+        })?;
+
+    Ok(())
+}
+
+fn save_time_steps_individual(id: &String, steps: Vec<SatState>) -> Result<()> {
+    const MAX_FILE_SIZE:usize = 1_048_576_000; //1 GB change as needed
+    let mut current_file_size:usize = 0;
+    let mut file_index:usize = 0;
+
+    let open_new_file = |file_index: usize| -> Result<BufWriter<File>> {
+        let filepath = format!("./data/output/raw/integration_{}_{}.txt", &id, &file_index);
+        let file = File::create(filepath)?;
+        Ok(BufWriter::new(file))
+    };
+
+    let mut writer = open_new_file(file_index)?;
+
+    for step in steps.into_iter() {
+        let formatted_step: String = format_step(step);
+        let current_line_size: usize = formatted_step.len();
+
+        let _ = writeln!(writer, "{}", formatted_step);
+        
+        if current_file_size + current_line_size > MAX_FILE_SIZE {
+            writer.flush()?;
+
+            //creates a new file
+            file_index += 1;
+            current_file_size = 0;
+            writer = open_new_file(file_index)?;
+        } else {
+            current_file_size += current_line_size
+        }
+    }
     Ok(())
 }
 
@@ -112,20 +176,20 @@ fn parallel_get_time_steps(map: HashMap<String, Vec<PropagationResult<1>>>, dens
 
 fn get_time_steps(results: Vec<PropagationResult<1>>, density:u16) -> Result<Vec<SatState>> {
     let mut time_steps: Vec<SatState> = Vec::new();
-    for result in results {
+    for result in results.into_iter() {
         let start = result.time_start;
-        time_steps.push(make_sat_state(start, result.state_start));
-        let dt = result.time_end - start;
+        let end = result.time_end;
+        let dt = end -  result.time_start;
 
         let interval = dt.as_seconds() / density as f64;
-        for i in 1..density {
+        for i in 0..density {
             let shift = interval * i as f64;
             let time = start + Duration::from_seconds(shift);
             let matrix_at_time = result.interp(&time).unwrap();
             let state_at_time = make_sat_state(time, matrix_at_time);
             time_steps.push(state_at_time);
         }
-        time_steps.push(make_sat_state(result.time_end, result.state_end))
+        time_steps.push(make_sat_state(end, result.state_end));
     }
     Ok(time_steps)
 }
@@ -158,7 +222,6 @@ fn integrate_between_gaps(records: Vec<SatState>, settings: &PropSettings) -> Re
 
         let result = propagate(&state, start, stop, settings, None).unwrap();
         result_vec.push(result)
-        
     }
     Ok(result_vec)
 }
