@@ -1,8 +1,9 @@
-use std::{cmp::Ordering, collections::HashMap, fs::File, io::{BufWriter, Write}};
+use std::{collections::HashMap, fs::File, io::{BufWriter, Write}};
 use rayon::prelude::*;
 use satkit::{frametransform::qteme2gcrf, orbitprop::{propagate, PropSettings, PropagationResult, SatState}, sgp4::sgp4, types::Vector3, Duration, Instant, TLE};
 use anyhow::Result;
 use nalgebra::SVector;
+use std::mem;
 
 pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16) -> Result<()> { //integration using streaming to upload to S3 and save space on device
     println!("Converting to SatStates");
@@ -21,85 +22,28 @@ pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16) -> Result<(
     Ok(())
 }
 
-fn save_time_steps(id: &String, steps: Vec<SatState>) -> Result<()> {
-    const MAX_FILE_SIZE:usize = 1_048_576_000; //1 GB change as needed
-    let mut current_file_size:usize = 0;
-    let mut file_index:usize = 0;
-
-    let open_new_file = |file_index: usize| -> Result<BufWriter<File>> {
-        let filepath = format!("./data/output/raw/integration_{}_{}.txt", &id, &file_index);
-        let file = File::create(filepath)?;
-        Ok(BufWriter::new(file))
-    };
-
-    let mut writer = open_new_file(file_index)?;
-
+fn save_time_steps(id: &String, steps: &Vec<SatState>, writer: &mut BufWriter<File>, file_index:usize) -> Result<()> {
     for step in steps.into_iter() {
-        let formatted_step: String = format_step(step);
-        let current_line_size: usize = formatted_step.len();
-
+        let formatted_step: String = format_step(&step);
         let _ = writeln!(writer, "{}", formatted_step);
-        
-        if current_file_size + current_line_size > MAX_FILE_SIZE {
-            writer.flush()?;
-
-            //creates a new file
-            file_index += 1;
-            current_file_size = 0;
-            writer = open_new_file(file_index)?;
-        } else {
-            current_file_size += current_line_size
-        }
     }
+    let _flush = writer.flush();
+
+    let filename = format!("integration_{}_{}.txt", &id, &file_index);
+
+    let path = format!("./data/output/raw/{}", filename);
+    let destination = format!("S:/SWARM/data/output/raw/{}", filename);
+
+    let _ = move_file(&path, &destination);
     Ok(())
 }
 
-fn format_step(step: SatState) -> String {
+fn format_step(step: &SatState) -> String {
     let time = step.time.as_unixtime();
     let pos_gcrf = step.pos_gcrf();
     let vel_gcrf = step.vel_gcrf();
     let formatted_step = format!("{},{},{},{},{},{},{}", time, pos_gcrf[0], pos_gcrf[1], pos_gcrf[2], vel_gcrf[0], vel_gcrf[1], vel_gcrf[2]);
     return formatted_step;
-}
-
-#[allow(dead_code)]
-fn compare_time_steps(a: &SatState, b: &SatState) -> Ordering {
-    let time_a = &a.time;
-    let time_b = &b.time;
-    if time_a > time_b {
-        return Ordering::Greater;
-    } else if time_b < time_a {
-        return Ordering::Less;
-    } else {
-        return Ordering::Equal;
-    }
-}
-
-#[allow(dead_code)]
-fn combine_into_one_vec(map: HashMap<String, Vec<SatState>>) -> Vec<SatState> {
-    map.into_par_iter()
-        .flat_map_iter(|(_id, state_vec)| state_vec)
-        .collect()
-}
-
-fn get_time_steps(results: Vec<PropagationResult<1>>, density:u16) -> Result<Vec<SatState>> {
-    let mut time_steps: Vec<SatState> = Vec::new();
-    for result in results.into_iter() {
-        let start = result.time_start;
-        let end = result.time_end;
-        let dt = end -  result.time_start;
-
-        let interval = dt.as_seconds() / density as f64;
-        for i in 0..density {
-            let shift = interval * i as f64;
-            let time = start + Duration::from_seconds(shift);
-            let matrix_at_time = result.interp(&time).unwrap();
-            let state_at_time = make_sat_state(time, matrix_at_time);
-            time_steps.push(state_at_time);
-        }
-        time_steps.push(make_sat_state(end, result.state_end));
-    }
-    Ok(time_steps)
 }
 
 fn make_sat_state(time: Instant, svec: SVector<f64, 6>) -> SatState {
@@ -168,12 +112,57 @@ fn convert_map_to_gcrf(map:HashMap<String, Vec<TLE>>) -> Result<HashMap<String, 
 }
 
 fn parallel_stream_integration(map: HashMap<String, Vec<SatState>>, settings: &PropSettings, density:u16) -> Result<()> {
+    const MAX_VEC_SIZE:usize = 524_288_000 ; //0.5 GB change as needed
     map.into_par_iter()
         .try_for_each(|(id, records)| -> Result<()>{
-            let results = integrate_between_gaps(records, settings)?;
-            let steps = get_time_steps(results, density)?;
-            save_time_steps(&id, steps)?;
-            Ok(())
+            Ok(stream(records, settings, &id, density, MAX_VEC_SIZE)?)
         })?;
+    Ok(())
+}
+
+fn move_file(filepath: &str, destination_filepath: &str) -> Result<()> {
+    let _copy = std::fs::copy(filepath, destination_filepath)?;
+    let deleted: () = std::fs::remove_file(filepath)?;
+    Ok(deleted)
+}
+
+fn stream(records: Vec<SatState>, settings: &PropSettings, id: &String, density:u16, max_vec_size: usize) -> Result<()>{
+    let results = integrate_between_gaps(records, settings)?;
+    
+    let mut time_steps: Vec<SatState> = Vec::new();
+
+    let mut file_index:usize = 0;
+
+    let open_new_file = |file_index: usize| -> Result<BufWriter<File>> {
+        let filepath = format!("./data/output/raw/integration_{}_{}.txt", &id, &file_index);
+        let file = File::create(filepath)?;
+        Ok(BufWriter::new(file))
+    };
+
+    let mut writer = open_new_file(file_index)?;
+
+    for result in results.into_iter() {
+        let start = result.time_start;
+        let end = result.time_end;
+        let dt = end -  result.time_start;
+
+        let interval = dt.as_seconds() / density as f64;
+        for i in 0..density {
+            let shift = interval * i as f64;
+            let time = start + Duration::from_seconds(shift);
+            let matrix_at_time = result.interp(&time).unwrap();
+            let state_at_time = make_sat_state(time, matrix_at_time);
+            time_steps.push(state_at_time);
+            
+            let vec_size_in_bytes = time_steps.len() * mem::size_of::<SatState>();
+            if vec_size_in_bytes > max_vec_size {
+                let _ = save_time_steps(&id, &time_steps, &mut writer, file_index);
+                time_steps.clear();
+                file_index += 1;
+                writer = open_new_file(file_index)?;
+            }
+        }
+        time_steps.push(make_sat_state(end, result.state_end));
+    }
     Ok(())
 }
