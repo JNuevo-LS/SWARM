@@ -4,110 +4,24 @@ use satkit::{frametransform::qteme2gcrf, orbitprop::{propagate, PropSettings, Pr
 use anyhow::Result;
 use nalgebra::SVector;
 
-pub(crate) fn integrate(map:HashMap<String, Vec<TLE>>, density:u16) -> Result<HashMap<String, Vec<SatState>>> {
+pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16) -> Result<()> { //integration using streaming to upload to S3 and save space on device
     println!("Converting to SatStates");
     let time = std::time::Instant::now();
     let map: HashMap<String, Vec<SatState>> = convert_map_to_gcrf(map)?;
     println!("Converted in {}", time.elapsed().as_secs_f64());
 
-    let settings = PropSettings::default();
-    // settings.gravity_order = 8;
+    let mut settings = PropSettings::default();
+    settings.gravity_order = 8;
 
     println!("Starting Numerical Integration Process");
     let time = std::time::Instant::now();
-    let results_map: HashMap<String, Vec<PropagationResult<1>>> = parallel_integrate_between_gaps(map, &settings)?;
+    let _integration_results = parallel_stream_integration(map, &settings, density)?; //integrates satellites in parallel and saves to a .txt file in a streaming fashion
     println!("Integrated in {}", time.elapsed().as_secs_f64());
 
-    println!("Getting all time steps");
-    let time = std::time::Instant::now();
-    let time_steps = parallel_get_time_steps(results_map, density)?;
-    println!("Finished in {}", time.elapsed().as_secs_f64());
-
-    Ok(time_steps)
-}
-
-pub(crate) fn integrate_streaming(map: HashMap<String, Vec<TLE>>, density:u16) -> Result<()> { //integration using streaming for lower memory machines
-    println!("Converting to SatStates");
-    let time = std::time::Instant::now();
-    let map: HashMap<String, Vec<SatState>> = convert_map_to_gcrf(map)?;
-    println!("Converted in {}", time.elapsed().as_secs_f64());
-
-    let settings = PropSettings::default();
-    // settings.gravity_order = 8;
-
-    println!("Starting Numerical Integration Process");
-    let time = std::time::Instant::now();
-    let results_map: HashMap<String, Vec<PropagationResult<1>>> = parallel_integrate_between_gaps(map, &settings)?;
-    println!("Integrated in {}", time.elapsed().as_secs_f64());
-
-    println!("Saving all time steps");
-    let _time_steps = parallel_save_time_steps_individual(results_map, density)?;
-    println!("Finished in {}", time.elapsed().as_secs_f64());
-
     Ok(())
 }
 
-pub fn save_time_steps_map(map: HashMap<String, Vec<SatState>>) -> Result<()> {
-    const MAX_FILE_SIZE:usize = 1_048_576_000; //1 GB change as needed
-    let mut current_file_size:usize = 0;
-    let mut file_index:usize = 0;
-
-    let open_new_file = |file_index: usize| -> Result<BufWriter<File>> {
-        let filepath = format!("./data/output/integration_{}.txt", &file_index);
-        let file = File::create(filepath)?;
-        Ok(BufWriter::new(file))
-    };
-
-    let mut writer = open_new_file(file_index)?;
-
-    println!("Combining to one vector");
-    let time = std::time::Instant::now();
-    let mut combined_steps = combine_into_one_vec(map);
-    println!("Finished combining in {}", time.elapsed().as_secs());
-
-    //sorts combined_steps by time in reverse chronological order (newest last)
-    println!("Sorting Combined Steps");
-    let time  = std::time::Instant::now();
-    combined_steps.par_sort_unstable_by(|a, b| compare_time_steps(a, b));
-    println!("Finished sorting in {} seconds", time.elapsed().as_secs());
-
-    println!("Writing to file now...");
-    let time = std::time::Instant::now();
-    for step in combined_steps.into_iter() {
-        let formatted_step: String = format_step(step);
-        let current_line_size: usize = formatted_step.len();
-
-        let _ = writeln!(writer, "{}", formatted_step);
-        
-        if current_file_size + current_line_size > MAX_FILE_SIZE {
-            writer.flush()?;
-
-            //creates a new file
-            file_index += 1;
-            current_file_size = 0;
-            writer = open_new_file(file_index)?;
-        } else {
-            current_file_size += current_line_size
-        }
-    }
-    println!("Finished writing in {}", time.elapsed().as_secs());
-    
-
-    Ok(())
-}
-
-fn parallel_save_time_steps_individual(map: HashMap<String, Vec<PropagationResult<1>>>, density:u16) -> Result<()> {
-    map.into_par_iter()
-        .try_for_each(|(id, results)| -> Result<()>{
-            let steps = get_time_steps(results, density)?;
-            save_time_steps_individual(&id, steps)?;
-            Ok(())
-        })?;
-
-    Ok(())
-}
-
-fn save_time_steps_individual(id: &String, steps: Vec<SatState>) -> Result<()> {
+fn save_time_steps(id: &String, steps: Vec<SatState>) -> Result<()> {
     const MAX_FILE_SIZE:usize = 1_048_576_000; //1 GB change as needed
     let mut current_file_size:usize = 0;
     let mut file_index:usize = 0;
@@ -148,6 +62,7 @@ fn format_step(step: SatState) -> String {
     return formatted_step;
 }
 
+#[allow(dead_code)]
 fn compare_time_steps(a: &SatState, b: &SatState) -> Ordering {
     let time_a = &a.time;
     let time_b = &b.time;
@@ -160,17 +75,10 @@ fn compare_time_steps(a: &SatState, b: &SatState) -> Ordering {
     }
 }
 
+#[allow(dead_code)]
 fn combine_into_one_vec(map: HashMap<String, Vec<SatState>>) -> Vec<SatState> {
     map.into_par_iter()
         .flat_map_iter(|(_id, state_vec)| state_vec)
-        .collect()
-}
-
-fn parallel_get_time_steps(map: HashMap<String, Vec<PropagationResult<1>>>, density:u16) -> Result<HashMap<String, Vec<SatState>>> {
-    map.into_par_iter()
-        .map(|(id, results)| {
-            get_time_steps(results, density).map(|states| (id, states))
-        })
         .collect()
 }
 
@@ -259,10 +167,13 @@ fn convert_map_to_gcrf(map:HashMap<String, Vec<TLE>>) -> Result<HashMap<String, 
         .collect()
 }
 
-fn parallel_integrate_between_gaps(map: HashMap<String, Vec<SatState>>, settings: &PropSettings) -> Result<HashMap<String, Vec<PropagationResult<1>>>> {
+fn parallel_stream_integration(map: HashMap<String, Vec<SatState>>, settings: &PropSettings, density:u16) -> Result<()> {
     map.into_par_iter()
-        .map(|(id, records)| {
-            integrate_between_gaps(records, &settings).map(|results| (id, results))
-        })
-        .collect()
+        .try_for_each(|(id, records)| -> Result<()>{
+            let results = integrate_between_gaps(records, settings)?;
+            let steps = get_time_steps(results, density)?;
+            save_time_steps(&id, steps)?;
+            Ok(())
+        })?;
+    Ok(())
 }
