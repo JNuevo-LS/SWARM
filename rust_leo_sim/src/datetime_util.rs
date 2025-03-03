@@ -66,3 +66,61 @@ pub fn hour_difference_between_epochs(datetime1:&String, datetime2:&String) -> R
         Ok((seconds_dt2 - seconds_dt1) / 3600)
     }
 }
+
+fn add_up(chars:&Vec<char> , start_i: usize, end_shift: usize) -> Result<u64> { //TODO: FIX THIS
+    if chars.len() < start_i + end_shift {
+        bail!("String too short in add_up");
+    }
+    let mut n: u64 = 0;
+    for i in start_i..(chars.len() - end_shift) {
+        n *= 10;
+        if chars[i].is_digit(10) {
+            //convert the char to its numeric value value
+            if let Some(digit) = chars[i].to_digit(10) {
+                n += digit as u64;
+            }
+        }
+    }
+    Ok(n)
+}
+
+fn convert_scientific(value: &str) -> Result<f64> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("Empty input");
+    }
+
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() < 3 {
+        bail!("Input too short");
+    }
+
+    let mut negative = false;
+    let numeric_value: u64;
+
+    if chars[0] == '-' {
+        negative = true;
+        if chars[chars.len() - 3] == 'e' { // deals with different formats
+            numeric_value = add_up(&chars, 1, 3)?;
+        } else {
+            numeric_value = add_up(&chars, 1, 2)?;
+        }
+    } else {
+        if chars[chars.len() - 3] == 'e' {
+            numeric_value = add_up(&chars, 0, 3)?;
+        } else {
+            numeric_value = add_up(&chars, 0, 2)?;
+        }
+    }
+
+    let exponent: String = chars[chars.len()-2..].iter().collect();
+
+    let result_str = if negative {
+        format!("-0.{}e{}", numeric_value, exponent)
+    } else {
+        format!("0.{}e{}", numeric_value, exponent)
+    };
+
+    Ok(result_str.parse::<f64>()?)
+
+}

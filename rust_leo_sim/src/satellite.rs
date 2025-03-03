@@ -3,7 +3,7 @@ use pyo3::types::{PyDict, PyList};
 
 #[derive(Clone)]
 pub(crate) struct SatelliteRecord {
-    pub(crate) catalog_number: u32,
+    pub(crate) catalog_number: i32,
     pub(crate) international_designator:String,
     pub(crate) orbital_records: Vec<OrbitalInstance>
 }
@@ -46,7 +46,7 @@ impl SatelliteRecord {
 
 #[derive(Clone)]
 pub(crate) struct OrbitalInstance {
-    pub(crate) epoch_year:u16,
+    pub(crate) epoch_year:i32,
     pub(crate) epoch_day:f64,
     pub(crate) first_time_derivative:f64,
     pub(crate) second_time_derivative:f64,
