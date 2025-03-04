@@ -112,7 +112,7 @@ fn convert_map_to_gcrf(map:HashMap<String, Vec<TLE>>) -> Result<HashMap<String, 
 }
 
 fn parallel_stream_integration(map: HashMap<String, Vec<SatState>>, settings: &PropSettings, density:u16) -> Result<()> {
-    const MAX_VEC_SIZE:usize = 1_048_576_000 ; //1 GB in mem change as needed
+    const MAX_VEC_SIZE:usize = 1_572_864_000 ; //1.5 GB in mem change as needed
     map.into_par_iter()
         .try_for_each(|(id, records)| -> Result<()>{
             Ok(stream(records, settings, &id, density, MAX_VEC_SIZE)?)
@@ -163,6 +163,7 @@ fn stream(records: Vec<SatState>, settings: &PropSettings, id: &String, density:
             }
         }
         time_steps.push(make_sat_state(end, result.state_end));
+        let _ = save_time_steps(id, &time_steps, &mut writer, file_index);
     }
     Ok(())
 }
