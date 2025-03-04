@@ -54,8 +54,8 @@ fn read_txt(filepath: &str) -> Result<HashMap<String, SatelliteRecord>> {
 
         let tle = TLE::load_2line(line1, line2).unwrap();
 
-        if is_leo(&tle)? {
-            let id = tle.intl_desig.clone();
+        if tle.eccen < 0.25 && tle.mean_motion > 11.25 {
+            let id = tle.sat_num.to_string();
 
             let unix_time: f64 = tle.epoch.as_unixtime();
             let whole_seconds = unix_time.trunc() as i64;
@@ -73,11 +73,11 @@ fn read_txt(filepath: &str) -> Result<HashMap<String, SatelliteRecord>> {
             let day_of_year_fractional = (day_of_year as f64) + fraction_of_day;
 
             let instance = OrbitalInstance {
-                epoch_year:           year, // or however you want
+                epoch_year:           year,
                 epoch_day:            day_of_year_fractional,
                 first_time_derivative: tle.mean_motion_dot,
                 second_time_derivative: tle.mean_motion_dot_dot,
-                drag:                 tle.bstar, // or however you store it
+                drag:                 tle.bstar,
                 inclination:          tle.inclination,
                 raan:                 tle.raan,
                 eccentricity:         tle.eccen,
@@ -110,12 +110,12 @@ pub(crate) fn read_txt_for_integration(filepath: &str) -> Result<HashMap<String,
     for satellite_tle in lines.chunks(2).into_iter() {
         let tle: TLE = TLE::load_2line(satellite_tle[0], satellite_tle[1]).unwrap();
 
-        if is_leo(&tle)? {
-            if satellites.contains_key(&tle.intl_desig) {
-                satellites.get_mut(&tle.intl_desig).unwrap().push(tle);
+        if tle.eccen < 0.25 && tle.mean_motion > 11.25 {
+            let id = tle.sat_num.to_string();
+            if satellites.contains_key(&id) {
+                satellites.get_mut(&id).unwrap().push(tle);
             } else {
                 let mut tle_vec: Vec<TLE> = Vec::new();
-                let id = tle.intl_desig.clone();
                 tle_vec.push(tle);
                 satellites.insert(id, tle_vec);
             }
@@ -138,12 +138,4 @@ fn clean_file<P: AsRef<Path>>(path: P) -> io::Result<()> { //sometimes needed if
         .collect();
     let new_content = filtered_lines.join("\n");
     fs::write(path, new_content)
-}
-
-fn is_leo(instance:&TLE) -> Result<bool> {
-    if instance.eccen < 0.25 && instance.mean_motion > 11.25 {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
 }
