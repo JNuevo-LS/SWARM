@@ -83,7 +83,7 @@ fn integrate_between_gaps(records: Vec<SatState>, settings: &PropSettings) -> Re
     Ok(result_vec)
 }
 
-fn teme_to_gcrf(records:Vec<TLE>) -> Result<Vec<SatState>> {
+fn tle_teme_to_gcrf(records:Vec<TLE>) -> Result<Vec<SatState>> {
     let mut gcrf_states:Vec<SatState> = Vec::new();
 
     for mut tle in records {
@@ -108,10 +108,15 @@ fn teme_to_gcrf(records:Vec<TLE>) -> Result<Vec<SatState>> {
     Ok(gcrf_states)
 }
 
+fn gcrf_to_teme(states: Vec<SatState>) {
+    let teme_states: Vec<SatState> = Vec::new();
+
+}
+
 fn convert_map_to_gcrf(map:HashMap<String, Vec<TLE>>) -> Result<HashMap<String, Vec<SatState>>> {
     map.into_par_iter()
         .map(|(id, records)| {
-            teme_to_gcrf(records).map(|states| (id, states))
+            tle_teme_to_gcrf(records).map(|states| (id, states))
         })
         .collect()
 }
@@ -159,6 +164,8 @@ fn stream(records: Vec<SatState>, settings: &PropSettings, id: &String, density:
         }
         time_steps.push(make_sat_state(end, result.state_end));
     }
-    let _ = save_time_steps(id, &time_steps, file_index, compression_level);
+    if !time_steps.is_empty() {
+        let _ = save_time_steps(id, &time_steps, file_index, compression_level);
+    }
     Ok(())
 }
