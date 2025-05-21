@@ -1,6 +1,7 @@
-use std::{fs::read_to_string, collections::HashMap, thread, time::Instant};
+use std::{fs::read_to_string, collections::HashMap, thread};
 use crate::satellite::{OrbitalInstance, SatelliteRecord};
 use anyhow::{bail, Ok, Result};
+use satkit::{orbitprop::SatState, types::Vector3};
 use crate::merge::merge_satellite_hashmaps;
 use std::fs;
 use std::io;
@@ -17,7 +18,7 @@ pub(crate) fn read_txt_files(year_start:u8, year_end:u8) -> HashMap<String, Sate
         .spawn(move || -> Result<HashMap<String, SatelliteRecord>> { //creates a thread for each .txt file
             let filepath: String = format!("./data/tle20{:02}.txt", i);
             // let _ = clean_file(&filepath);
-            let time: Instant = Instant::now();
+            let time: std::time::Instant = std::time::Instant::now();
             println!("[{i}] Now reading");
             let satellites: HashMap<String, SatelliteRecord> = read_txt(&filepath).expect("Failed to read txt file");
             println!("[{i}] Reading is done");
@@ -105,7 +106,7 @@ pub(crate) fn read_txt_for_integration(filepath: &str) -> Result<HashMap<String,
     let lines: Vec<&str> = file_contents.lines().collect();
 
     println!("Creating TLE structs out of lines");
-    let time = Instant::now();
+    let time = std::time::Instant::now();
     let mut satellites: HashMap<String, Vec<TLE>> = HashMap::new();
     for satellite_tle in lines.chunks(2).into_iter() {
         let tle: TLE = TLE::load_2line(satellite_tle[0], satellite_tle[1]).unwrap();
@@ -123,6 +124,23 @@ pub(crate) fn read_txt_for_integration(filepath: &str) -> Result<HashMap<String,
     }
     println!("Finished! \n Size of HashMap: {} \n Time Elapsed (s): {}", satellites.len(), time.elapsed().as_secs());
     Ok(satellites)
+}
+
+pub(crate) fn read_txt_integrated(filepath: &str) -> Result<Vec<SatState>> {
+    let file_contents = read_to_string(filepath)?;
+    let lines: Vec<&str> = file_contents.lines().collect();
+
+    let mut states: Vec<SatState> = Vec::new();
+
+    for line in lines.into_iter() {
+        let line_split: Vec<&str> = line.split(",").collect();
+        let epoch: satkit::Instant = satkit::Instant::new(line_split[0].parse::<i64>()?);
+        let pos = Vector3::new(line_split[1].parse()?, line_split[2].parse()?, line_split[3].parse()?);
+        let vel = Vector3::new(line_split[4].parse()?, line_split[5].parse()?, line_split[6].parse()?);
+        let state = SatState::from_pv(&epoch, &pos, &vel);
+        states.push(state);
+    } 
+    Ok(states)
 }
 
 #[allow(dead_code)]
