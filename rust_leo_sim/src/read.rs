@@ -126,6 +126,7 @@ pub(crate) fn read_txt_for_integration(filepath: &str) -> Result<HashMap<String,
     Ok(satellites)
 }
 
+#[allow(dead_code)]
 pub(crate) fn read_txt_integrated(filepath: &str) -> Result<Vec<SatState>> {
     let file_contents = read_to_string(filepath)?;
     let lines: Vec<&str> = file_contents.lines().collect();

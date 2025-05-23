@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, VecDeque}, fs::File, io::{BufWriter, Write}, time};
+use std::{collections::{HashMap, VecDeque}, fs::File, io::{BufWriter, Write}};
 use rayon::prelude::*;
 use satkit::{frametransform::qteme2gcrf, orbitprop::{propagate, PropSettings, PropagationResult, SatState}, sgp4::sgp4, types::Vector3, Duration, Instant, TLE};
 use anyhow::Result;
@@ -57,7 +57,8 @@ fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &Stri
         steps.push(make_sat_state(end, result.state_end));
         time_batches.push(steps);
 
-        let vec_size_in_bytes = (time_batches.len() * mem::size_of::<Vec<SatState>>()) + (time_batches.len() * (density as usize * mem::size_of::<SatState>())) ; 
+        let vec_size_in_bytes = (time_batches.len() * mem::size_of::<Vec<SatState>>()) + time_batches.iter()
+        .map(|batch| batch.capacity() * mem::size_of::<SatState>()).sum::<usize>();
         let queue_size_in_bytes = queue.len() * mem::size_of::<TLE>();
         let total_size_in_bytes = vec_size_in_bytes + queue_size_in_bytes;
 
@@ -190,6 +191,7 @@ fn parallel_stream_integration(map: HashMap<String, (Vec<TLE>, Vec<SatState>)>, 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn move_file(filepath: &str, destination_filepath: &str) -> Result<()> {
     let _copy = std::fs::copy(filepath, destination_filepath)?;
     let deleted: () = std::fs::remove_file(filepath)?;
@@ -200,7 +202,7 @@ fn write_tle_data(encoder: &mut Encoder<'static, BufWriter<File>>, tle:&TLE) -> 
     let line1: String = write_line1(tle)?;
     let line2: String = write_line2(tle)?;
 
-    let two_lines: String = format!("{} \n {} ", line1, line2);
+    let two_lines: String = format!("{} \n{} ", line1, line2);
 
     let _ = writeln!(encoder, "{}", two_lines);
 
@@ -220,7 +222,12 @@ fn write_line1(tle:&TLE) -> Result<String> {
     let international_designator: String = tle.intl_desig.clone();
 
     //last two digits of the launch year
-    let year: i32 = tle.desig_year;
+    let mut year: i32 = tle.epoch.as_datetime().0;
+    if year > 2000 {
+        year = year - 2000
+    } else {
+        year = year - 1900
+    }
 
     //day of the year + fractional part of day
     let unix_t = tle.epoch.as_unixtime();
@@ -258,7 +265,7 @@ fn write_line1(tle:&TLE) -> Result<String> {
     let (bstar_mantissa, bstar_exp) = to_tle_scientific(bstar_val);
 
     //now we build line1
-    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}{:-3} {}{:4}{:-3} {} {:04}",
+    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}-{} {}{:4}{} {} {:04}",
         sat_num_string,
         international_designator,
         year,
@@ -294,7 +301,7 @@ fn write_line2(tle:&TLE) -> Result<String> {
         line2.replace_range(line2.len()-9..line2.len()-7, "");
     }
 
-    write!(&mut line2, " {:8.4} {:8.4} {:11.8}{:5}",
+    write!(&mut line2, " {:8.4} {:8.4} {:11.8}{:05}",
         tle.arg_of_perigee,
         tle.mean_anomaly,
         tle.mean_motion,
