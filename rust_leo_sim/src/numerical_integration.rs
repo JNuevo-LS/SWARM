@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, io::{BufWriter, Write}};
+use std::{collections::HashMap, fs::File, io::{BufWriter, Write}, str::FromStr};
 use rayon::prelude::*;
 use satkit::{frametransform::qteme2gcrf, orbitprop::{propagate, PropSettings, PropagationResult, SatState}, sgp4::sgp4, types::Vector3, Duration, Instant, TLE};
 use anyhow::Result;
@@ -23,7 +23,7 @@ pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16, compression
     Ok(())
 }
 
-fn save_time_steps_zstd(file: File, mut encoder:Encoder<'static, BufWriter<File>>, steps: Vec<SatState>) -> Result<()> {
+fn save_time_steps_zstd(mut encoder:Encoder<'static, BufWriter<File>>, steps: Vec<SatState>) -> Result<BufWriter<File>> {
     for step in steps.into_iter() {
         let formatted_step: String = format_step(&step);
         let _ = writeln!(encoder, "{}", formatted_step);
@@ -31,7 +31,7 @@ fn save_time_steps_zstd(file: File, mut encoder:Encoder<'static, BufWriter<File>
     let mut inner_writer = encoder.finish()?;
     let _flush = inner_writer.flush();
 
-    Ok(())
+    Ok(inner_writer)
 }
 
 fn create_file(filename: &String) -> Result<File> {
@@ -136,16 +136,22 @@ fn move_file(filepath: &str, destination_filepath: &str) -> Result<()> {
 }
 
 fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &String, density:u16, max_vec_size: usize, compression_level: i32) -> Result<()>{
-    let states: Vec<SatState> = records.1;
+    let (tles, states) = records;
     let results = integrate_between_gaps(states, settings)?; //this generates a propagation result object in between every SatState (instance in time)
     
     let mut time_steps: Vec<SatState> = Vec::new();
     let mut file_index:usize = 0;
 
-    for (tle, result) in results.into_iter().enumerate() { //this then uses the propagation results generated to save n = density instances in time between each interval
+    let filename: String = format!("integration_{}_{}.txt.zst", &id, &file_index);
+    let file: File = create_file(&filename)?;
+    let writer: BufWriter<File> = BufWriter::new(file);
+    let mut encoder: Encoder<'static, BufWriter<File>> = Encoder::new(writer, compression_level)?; //used to compress with
+    for (i, result) in results.into_iter().enumerate() { //this then uses the propagation results generated to save n = density instances in time between each interval
         let start = result.time_start;                                       //each instance contains the time, position, and velocity of the satellite (i.e they're all SatStates)
         let end = result.time_end;
         let dt = end -  result.time_start;
+
+        write_TLE_data(encoder, tles[i]);
 
         let interval = dt.as_seconds() / density as f64;
         for j in 0..density {
@@ -157,14 +163,10 @@ fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &Stri
             
             let vec_size_in_bytes = time_steps.len() * mem::size_of::<SatState>();
             if vec_size_in_bytes > max_vec_size { //we flush the content of time_steps to a new file
-                let filename: String = format!("integration_{}_{}.txt.zst", &id, &file_index);
-                let file: File = create_file(&filename)?;
-                let writer: BufWriter<File> = BufWriter::new(file);
                 let mut encoder: Encoder<'static, BufWriter<File>> = Encoder::new(writer, compression_level)?;
-                let _ = save_time_steps_zstd(file, encoder, time_steps);
+                let _ = save_time_steps_zstd(encoder, time_steps);
                 let destination = format!("/mnt/IronWolfPro8TB/SWARM/data/output/raw/{}", &filename);
                 time_steps.clear();
-                file_index += 1;
             }
         }
         time_steps.push(make_sat_state(end, result.state_end));
@@ -172,5 +174,51 @@ fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &Stri
     if !time_steps.is_empty() {
         let _ = save_time_steps_zstd(id, &time_steps);
     }
+    Ok(())
+}
+
+fn write_TLE_data(encoder: Encoder<'static, BufWriter<File>>, tle:TLE) -> Result<()>{
+    //write line1
+    let mut line1: String = String::from_str("1 ")?;
+
+    //indices 2-7 (excluded) are the satellite catalog number
+    let sat_num: i32 = tle.sat_num;
+    let num_digits: i32 = i32::ilog10(sat_num) as i32;
+    let mut sat_num_string = String::from_str("")?;
+    if num_digits < 5 {
+        let num_zeroes: usize = 5 - (num_digits as usize);
+        let zeroes = "0".repeat(num_zeroes);
+        sat_num_string.push_str(&zeroes);
+        sat_num_string.push_str(&sat_num.to_string());
+    } else {
+        sat_num_string.push_str(&sat_num.to_string());
+    }
+    line1.push_str(&sat_num_string);
+    line1.push_str("U "); //index 7 is the classification, hardcoded because there are no classified satellites in data
+
+    //indices 9-17 make up the international designator
+    let international_designator: String = tle.intl_desig;
+    let len: usize = international_designator.chars().count();
+    line1.push_str(&international_designator);
+    if len < 8 {
+        let padding = len - 8;
+        line1.push_str(&" ".repeat(padding))
+    }
+    line1.push_str(" ");
+
+    //indices 18-20 are the last two digits of the launch year
+    let year = tle.desig_year;
+    line1.push_str(&year.to_string());
+
+    //20-32 is the day of the year + fractional part of day
+    let day = tle.epoch.as_unixtime() / (60.0 * 60.0 * 24.0) ;
+    if year > 30 {
+        let day = day - (20.0 + year as f64);
+    }
+
+
+    //write line2
+
+
     Ok(())
 }
