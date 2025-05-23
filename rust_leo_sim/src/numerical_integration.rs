@@ -1,10 +1,11 @@
-use std::{collections::HashMap, fs::File, io::{BufWriter, Write}, str::FromStr};
+use std::{collections::{HashMap, VecDeque}, fs::File, io::{BufWriter, Write}, time};
 use rayon::prelude::*;
 use satkit::{frametransform::qteme2gcrf, orbitprop::{propagate, PropSettings, PropagationResult, SatState}, sgp4::sgp4, types::Vector3, Duration, Instant, TLE};
 use anyhow::Result;
 use nalgebra::SVector;
 use std::mem;
 use zstd::Encoder;
+use chrono::{Datelike, TimeZone, Utc};
 
 pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16, compression_level:i32) -> Result<()> { //integration using streaming to upload to S3 and save space on device
     println!("Converting to SatStates");
@@ -23,19 +24,79 @@ pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16, compression
     Ok(())
 }
 
-fn save_time_steps_zstd(mut encoder:Encoder<'static, BufWriter<File>>, steps: Vec<SatState>) -> Result<BufWriter<File>> {
+fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &String, density:u16, max_vec_size: usize, compression_level: i32) -> Result<()>{
+    let (tles, states) = records;
+    let results = integrate_between_gaps(states, settings)?; //this generates a propagation result object in between every SatState (instance in time)
+    
+    let mut time_batches: Vec<Vec<SatState>> = Vec::new(); //stores each "step"
+    let filename: String = format!("integration_{}.txt.zst", &id);
+    let file: File = create_file(&filename)?;
+    let writer: BufWriter<File> = BufWriter::new(file);
+    let mut encoder: Encoder<'static, BufWriter<File>> = Encoder::new(writer, compression_level)?; //used to compress data with
+
+    let mut tle_iter = tles.into_iter(); //consuming iterator for TLEs
+    let mut queue: VecDeque<TLE> = VecDeque::new(); //used to store TLE order before writing to buffer
+
+    for result in results.into_iter() { //this then uses the propagation results generated to save n = density instances in time between each interval
+        let start: Instant = result.time_start;                                       //each instance contains the time, position, and velocity of the satellite (i.e they're all SatStates)
+        let end: Instant = result.time_end;
+        let dt: Duration = end -  result.time_start;
+
+        let current_tle = tle_iter.next().unwrap(); //writes the TLE lines for this specific instance, to then be used in training (as needed by the DSGP4 model)
+        queue.push_back(current_tle);
+
+        let interval: f64 = dt.as_seconds() / density as f64;
+        let mut steps: Vec<SatState> = Vec::new();
+        for j in 0..density {
+            let shift: f64 = interval * j as f64;
+            let time: Instant = start + Duration::from_seconds(shift);
+            let matrix_at_time = result.interp(&time).unwrap();
+            let state_at_time: SatState = make_sat_state(time, matrix_at_time);
+            steps.push(state_at_time);
+        }
+        steps.push(make_sat_state(end, result.state_end));
+        time_batches.push(steps);
+
+        let vec_size_in_bytes = (time_batches.len() * mem::size_of::<Vec<SatState>>()) + (time_batches.len() * (density as usize * mem::size_of::<SatState>())) ; 
+        let queue_size_in_bytes = queue.len() * mem::size_of::<TLE>();
+        let total_size_in_bytes = vec_size_in_bytes + queue_size_in_bytes;
+
+        if total_size_in_bytes > max_vec_size { //we flush the data generated to a new file
+            let _ = dump_data_batches(&mut encoder, &mut queue, &time_batches);
+            time_batches.clear();
+        }
+    }
+    if !time_batches.is_empty() {
+        let _ = dump_data_batches(&mut encoder, &mut queue, &time_batches);
+    }
+
+    let mut inner_writer = encoder.finish()?;
+    let _flush = inner_writer.flush()?;
+    // let destination: String = format!("/mnt/IronWolfPro8TB/SWARM/data/output/raw/{}", &filename);
+    // let _ = move_file(&filename, &destination);
+
+    Ok(())
+}
+
+fn dump_data_batches(encoder: &mut Encoder<'static, BufWriter<File>>, queue: &mut VecDeque<TLE>, batches: &Vec<Vec<SatState>>) {
+    for batch in batches {
+        let corresponding_tle = queue.pop_front().unwrap();
+        let _ = write_tle_data(encoder, &corresponding_tle);
+        let _ = write_time_steps_zstd(encoder, &batch);
+    }
+}
+
+
+fn write_time_steps_zstd(encoder: &mut Encoder<'static, BufWriter<File>>, steps: &Vec<SatState>) -> Result<()> {
     for step in steps.into_iter() {
         let formatted_step: String = format_step(&step);
         let _ = writeln!(encoder, "{}", formatted_step);
     }
-    let mut inner_writer = encoder.finish()?;
-    let _flush = inner_writer.flush();
-
-    Ok(inner_writer)
+    Ok(())
 }
 
 fn create_file(filename: &String) -> Result<File> {
-    let path = format!("./data/output/raw/{}", filename);
+    let path = format!("/mnt/IronWolfPro8TB/SWARM/data/output/raw/{}", filename);
     let file: File = File::create(&path)?;
     Ok(file)
 }
@@ -121,7 +182,7 @@ fn convert_map_to_gcrf(map:HashMap<String, Vec<TLE>>) -> Result<HashMap<String, 
 }
 
 fn parallel_stream_integration(map: HashMap<String, (Vec<TLE>, Vec<SatState>)>, settings: &PropSettings, density:u16, compression_level:i32) -> Result<()> {
-    const MAX_VEC_SIZE:usize = 1_572_864_000 ; //1.5 GB in mem change as needed
+    const MAX_VEC_SIZE:usize = 1_073_741_824 ; //1 GB in mem change as needed
     map.into_par_iter()
         .try_for_each(|(id, records)| -> Result<()>{
             Ok(stream(records, settings, &id, density, MAX_VEC_SIZE, compression_level)?)
@@ -135,90 +196,131 @@ fn move_file(filepath: &str, destination_filepath: &str) -> Result<()> {
     Ok(deleted)
 }
 
-fn stream(records: (Vec<TLE>, Vec<SatState>), settings: &PropSettings, id: &String, density:u16, max_vec_size: usize, compression_level: i32) -> Result<()>{
-    let (tles, states) = records;
-    let results = integrate_between_gaps(states, settings)?; //this generates a propagation result object in between every SatState (instance in time)
-    
-    let mut time_steps: Vec<SatState> = Vec::new();
-    let mut file_index:usize = 0;
+fn write_tle_data(encoder: &mut Encoder<'static, BufWriter<File>>, tle:&TLE) -> Result<()>{
+    let line1: String = write_line1(tle)?;
+    let line2: String = write_line2(tle)?;
 
-    let filename: String = format!("integration_{}_{}.txt.zst", &id, &file_index);
-    let file: File = create_file(&filename)?;
-    let writer: BufWriter<File> = BufWriter::new(file);
-    let mut encoder: Encoder<'static, BufWriter<File>> = Encoder::new(writer, compression_level)?; //used to compress with
-    for (i, result) in results.into_iter().enumerate() { //this then uses the propagation results generated to save n = density instances in time between each interval
-        let start = result.time_start;                                       //each instance contains the time, position, and velocity of the satellite (i.e they're all SatStates)
-        let end = result.time_end;
-        let dt = end -  result.time_start;
+    let two_lines: String = format!("{} \n {} ", line1, line2);
 
-        write_TLE_data(encoder, tles[i]);
+    let _ = writeln!(encoder, "{}", two_lines);
 
-        let interval = dt.as_seconds() / density as f64;
-        for j in 0..density {
-            let shift = interval * j as f64;
-            let time = start + Duration::from_seconds(shift);
-            let matrix_at_time = result.interp(&time).unwrap();
-            let state_at_time = make_sat_state(time, matrix_at_time);
-            time_steps.push(state_at_time);
-            
-            let vec_size_in_bytes = time_steps.len() * mem::size_of::<SatState>();
-            if vec_size_in_bytes > max_vec_size { //we flush the content of time_steps to a new file
-                let mut encoder: Encoder<'static, BufWriter<File>> = Encoder::new(writer, compression_level)?;
-                let _ = save_time_steps_zstd(encoder, time_steps);
-                let destination = format!("/mnt/IronWolfPro8TB/SWARM/data/output/raw/{}", &filename);
-                time_steps.clear();
-            }
-        }
-        time_steps.push(make_sat_state(end, result.state_end));
-    }
-    if !time_steps.is_empty() {
-        let _ = save_time_steps_zstd(id, &time_steps);
-    }
     Ok(())
 }
 
-fn write_TLE_data(encoder: Encoder<'static, BufWriter<File>>, tle:TLE) -> Result<()>{
+fn write_line1(tle:&TLE) -> Result<String> {
+    use std::fmt::Write;
+
     //write line1
-    let mut line1: String = String::from_str("1 ")?;
+    let mut line1: String = String::with_capacity(70);
 
-    //indices 2-7 (excluded) are the satellite catalog number
+    //satellite catalog number
     let sat_num: i32 = tle.sat_num;
-    let num_digits: i32 = i32::ilog10(sat_num) as i32;
-    let mut sat_num_string = String::from_str("")?;
-    if num_digits < 5 {
-        let num_zeroes: usize = 5 - (num_digits as usize);
-        let zeroes = "0".repeat(num_zeroes);
-        sat_num_string.push_str(&zeroes);
-        sat_num_string.push_str(&sat_num.to_string());
+    let sat_num_string = format!("{:05}U", sat_num);
+
+    let international_designator: String = tle.intl_desig.clone();
+
+    //last two digits of the launch year
+    let year: i32 = tle.desig_year;
+
+    //day of the year + fractional part of day
+    let unix_t = tle.epoch.as_unixtime();
+    let unix_t_ns = (unix_t.fract() * 1_000_000.0) as u32; //integer number of nanoseconds
+    let unix_t_int = unix_t.trunc() as i64;
+    let datetime = Utc.timestamp_opt(unix_t_int, unix_t_ns).unwrap();
+    let ordinal = datetime.ordinal();
+    let nanoseconds_in_day = 24.0 * 60.0 * 60.0 * 1_000_000_000.0;
+    let fractional_part_of_day = (datetime.timestamp_subsec_nanos() as f64) / nanoseconds_in_day;
+    let fractional_ordinal = (ordinal as f64) + fractional_part_of_day;
+
+    //first derivative of mean motion
+    let first_derivative = tle.mean_motion_dot;
+    let mut first_dt_string = format!("{:09.8}", first_derivative);
+    if first_dt_string.starts_with("-0.") {
+        first_dt_string.replace_range(1..2, ""); //removes zero in negative values
     } else {
-        sat_num_string.push_str(&sat_num.to_string());
+        first_dt_string.replace_range(0..1, "+"); //removes zero in positive values
     }
-    line1.push_str(&sat_num_string);
-    line1.push_str("U "); //index 7 is the classification, hardcoded because there are no classified satellites in data
+    
+    //second derivative of mean motion
+    let (second_dt_sign, second_dt_val) = if tle.mean_motion_dot_dot < 0.0 {
+        ('-', -tle.mean_motion_dot_dot)
+    } else {
+        ('+', tle.mean_motion_dot_dot)
+    };
+    let (second_dt_mantissa, second_dt_exp) = to_tle_scientific(second_dt_val);
 
-    //indices 9-17 make up the international designator
-    let international_designator: String = tle.intl_desig;
-    let len: usize = international_designator.chars().count();
-    line1.push_str(&international_designator);
-    if len < 8 {
-        let padding = len - 8;
-        line1.push_str(&" ".repeat(padding))
+    //the bstar drag term
+    let (bstar_sign, bstar_val) = if tle.bstar < 0.0 {
+        ('-', -tle.bstar)
+    } else {
+        (' ', tle.bstar)
+    };
+    let (bstar_mantissa, bstar_exp) = to_tle_scientific(bstar_val);
+
+    //now we build line1
+    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}{:-3} {}{:4}{:-3} {} {:04}",
+        sat_num_string,
+        international_designator,
+        year,
+        fractional_ordinal,
+        first_dt_string,
+        second_dt_sign,
+        second_dt_mantissa,
+        second_dt_exp,
+        bstar_sign,
+        bstar_mantissa,
+        bstar_exp,
+        tle.ephem_type,
+        tle.element_num
+    ).unwrap();
+
+    Ok(line1)
+}
+
+fn write_line2(tle:&TLE) -> Result<String> {
+    use std::fmt::Write;
+
+    let mut line2 = String::with_capacity(70);
+
+    write!(&mut line2, "2 {:5} {:8.4} {:8.4} ",
+        tle.sat_num,
+        tle.inclination,
+        tle.raan
+    ).unwrap();
+
+    write!(&mut line2, "{:07.7}", tle.eccen).unwrap();
+    if tle.eccen < 1.0 {
+        //removes the "0."
+        line2.replace_range(line2.len()-9..line2.len()-7, "");
     }
-    line1.push_str(" ");
 
-    //indices 18-20 are the last two digits of the launch year
-    let year = tle.desig_year;
-    line1.push_str(&year.to_string());
+    write!(&mut line2, " {:8.4} {:8.4} {:11.8}{:5}",
+        tle.arg_of_perigee,
+        tle.mean_anomaly,
+        tle.mean_motion,
+        tle.rev_num
+    ).unwrap();
 
-    //20-32 is the day of the year + fractional part of day
-    let day = tle.epoch.as_unixtime() / (60.0 * 60.0 * 24.0) ;
-    if year > 30 {
-        let day = day - (20.0 + year as f64);
+    Ok(line2)
+}
+
+fn to_tle_scientific(value: f64) -> (String, i32) {
+    if value == 0.0 {
+        return ("00000".to_string(), 0);
     }
-
-
-    //write line2
-
-
-    Ok(())
+    
+    // Convert to scientific notation
+    let log10 = value.log10();
+    let exp = log10.floor() as i32;
+    let mantissa = value / 10f64.powi(exp);
+    
+    // Format mantissa to 5 digits without decimal point
+    let mantissa_scaled = mantissa * 10000.0;
+    let mantissa_int = mantissa_scaled.round() as i32;
+    let mantissa_str = format!("{:05}", mantissa_int);
+    
+    // Adjust exponent for the scaling
+    let final_exp = exp - 4;
+    
+    (mantissa_str, final_exp)
 }
