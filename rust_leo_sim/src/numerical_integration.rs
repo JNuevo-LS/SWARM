@@ -5,7 +5,7 @@ use anyhow::Result;
 use nalgebra::SVector;
 use std::mem;
 use zstd::Encoder;
-use chrono::{Datelike, TimeZone, Utc};
+use chrono::{Datelike, TimeZone, Timelike, Utc};
 
 pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16, compression_level:i32) -> Result<()> { //integration using streaming to upload to S3 and save space on device
     println!("Converting to SatStates");
@@ -235,8 +235,12 @@ fn write_line1(tle:&TLE) -> Result<String> {
     let unix_t_int = unix_t.trunc() as i64;
     let datetime = Utc.timestamp_opt(unix_t_int, unix_t_ns).unwrap();
     let ordinal = datetime.ordinal();
-    let nanoseconds_in_day = 24.0 * 60.0 * 60.0 * 1_000_000_000.0;
-    let fractional_part_of_day = (datetime.timestamp_subsec_nanos() as f64) / nanoseconds_in_day;
+    let hour = datetime.hour() as f64;
+    let minute = datetime.minute() as f64;
+    let second = datetime.second() as f64;
+    let nano = datetime.nanosecond() as f64;
+    let seconds_since_midnight = hour * 3600.0 + minute * 60.0 + second + nano / 1_000_000_000.0;
+    let fractional_part_of_day = seconds_since_midnight / (24.0 * 3600.0);
     let fractional_ordinal = (ordinal as f64) + fractional_part_of_day;
 
     //first derivative of mean motion
@@ -265,7 +269,7 @@ fn write_line1(tle:&TLE) -> Result<String> {
     let (bstar_mantissa, bstar_exp) = to_tle_scientific(bstar_val);
 
     //now we build line1
-    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}-{} {}{:4}{} {} {:04}",
+    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}{} {}{:4}{} {} {:04}",
         sat_num_string,
         international_designator,
         year,
@@ -289,7 +293,7 @@ fn write_line2(tle:&TLE) -> Result<String> {
 
     let mut line2 = String::with_capacity(70);
 
-    write!(&mut line2, "2 {:5} {:8.4} {:8.4} ",
+    write!(&mut line2, "2 {:05} {:8.4} {:8.4} ",
         tle.sat_num,
         tle.inclination,
         tle.raan
@@ -316,18 +320,18 @@ fn to_tle_scientific(value: f64) -> (String, i32) {
         return ("00000".to_string(), 0);
     }
     
-    // Convert to scientific notation
+    //convert to scientific notation
     let log10 = value.log10();
     let exp = log10.floor() as i32;
     let mantissa = value / 10f64.powi(exp);
     
-    // Format mantissa to 5 digits without decimal point
+    //format mantissa to 5 digits without decimal point
     let mantissa_scaled = mantissa * 10000.0;
     let mantissa_int = mantissa_scaled.round() as i32;
     let mantissa_str = format!("{:05}", mantissa_int);
     
-    // Adjust exponent for the scaling
-    let final_exp = exp - 4;
+    //addjust for scaling
+    let final_exp = exp - 1;
     
     (mantissa_str, final_exp)
 }
