@@ -269,7 +269,7 @@ fn write_line1(tle:&TLE) -> Result<String> {
     let (bstar_mantissa, bstar_exp) = to_tle_scientific(bstar_val);
 
     //now we build line1
-    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}{} {}{:4}{} {} {:04}",
+    write!(&mut line1, "1 {} {:8} {:02}{:012.8} {} {}{:5}-{} {}{:4}-{} {} {:04}",
         sat_num_string,
         international_designator,
         year,
@@ -284,6 +284,9 @@ fn write_line1(tle:&TLE) -> Result<String> {
         tle.ephem_type,
         tle.element_num
     ).unwrap();
+
+    let checksum = compute_checksum(&line1)?;
+    write!(&mut line1, "{}", checksum).unwrap();
 
     Ok(line1)
 }
@@ -312,6 +315,9 @@ fn write_line2(tle:&TLE) -> Result<String> {
         tle.rev_num
     ).unwrap();
 
+    let checksum = compute_checksum(&line2)?;
+    write!(&mut line2, "{}", checksum).unwrap();
+
     Ok(line2)
 }
 
@@ -330,8 +336,27 @@ fn to_tle_scientific(value: f64) -> (String, i32) {
     let mantissa_int = mantissa_scaled.round() as i32;
     let mantissa_str = format!("{:05}", mantissa_int);
     
-    //addjust for scaling
-    let final_exp = exp - 1;
+    //adjust for scaling
+    let adjusted_exp = exp + 1;
+    let final_exp = adjusted_exp.abs();
     
     (mantissa_str, final_exp)
+}
+
+fn compute_checksum(line:&String) -> Result<u32> {
+    let mut checksum: u32 = 0;
+
+    let line_chars: Vec<char> = line.chars().collect();
+
+    for c in line_chars.into_iter() {
+        if c.is_digit(10) {
+            checksum += c.to_digit(10).unwrap();
+        } else if c == '-' {
+            checksum += 1;
+        }
+    }
+
+    checksum = checksum % 10;
+
+    Ok(checksum)
 }
