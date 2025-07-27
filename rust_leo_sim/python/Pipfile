@@ -1,0 +1,27 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[[source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu118"
+verify_ssl = true
+
+[packages]
+numpy = "*"
+zstandard = "*"
+satkit = "*"
+dsgp4 = "*"
+matplotlib = "*"
+matplotlib-inline = "*"
+torch = "*"
+torchvision = "*"
+torchaudio = "*"
+ipynb = "*"
+ipykernel = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"
