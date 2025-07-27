@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
-import util
+from util import transform
 
 class mldsgp4(nn.Module):
     def __init__(self, 
@@ -165,7 +165,7 @@ def initialize_tle(tles,
     """
     from dsgp4.sgp4init import sgp4init
     from dsgp4.sgp4init_batch import sgp4init_batch
-    whichconst=util.get_gravity_constants(gravity_constant_name)
+    whichconst=transform.get_gravity_constants(gravity_constant_name)
     deep_space_counter=0
 
     if isinstance(tles,list):
