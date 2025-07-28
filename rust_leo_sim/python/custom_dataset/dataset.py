@@ -59,7 +59,7 @@ class TrainingStep:
 @dataclass
 class CurrentBatch:
     idx: int
-    step: list[TrainingStep]
+    training_step: list[TrainingStep]
 
 class LazyDataset(Dataset):
     def __init__(self, folder: str, batch_size: int = 8, randomized_order: bool = True, multiprocess: bool = False):
@@ -118,7 +118,7 @@ class LazyDataset(Dataset):
 
         batch_args = [(lines,) for lines in loaded_lines]
         loaded_batch = read_blocks(batch_args)
-        return CurrentBatch(self.current_batch_idx, loaded_batch)
+        return loaded_batch
 
     def _get_batch_pooled(self, idx):
         if abs(idx) >= self.num_batches:
@@ -130,7 +130,7 @@ class LazyDataset(Dataset):
 
             batch_args = [(lines,) for lines in loaded_lines]
             loaded_batch = pool.starmap(read_blocks, batch_args)
-        return CurrentBatch(self.current_batch_idx, loaded_batch)
+        return loaded_batch
         
     def _batch_list(input_list: list, batch_size: int = 8):
         """
@@ -142,11 +142,9 @@ class LazyDataset(Dataset):
         """
         Returns the next batch of data, loading it if necessary. Increments the current index.
         """
-        if self.current_batch_idx >= self.num_batches:
-            self.current_batch_idx = 0
         if not self.loaded_in or self.loaded_in.idx != self.current_batch_idx:
-            self.loaded_in = self.batcher(self.current_batch_idx)
+            self.loaded_in = CurrentBatch(self.current_batch_idx, self.batcher(self.current_batch_idx))
 
-        batch = self.loaded_in
-        self.current_batch_idx += 1
+        batch = self.loaded_in.training_step
+        self.current_batch_idx = (self.current_batch_idx + 1) % self.num_batches
         return batch
