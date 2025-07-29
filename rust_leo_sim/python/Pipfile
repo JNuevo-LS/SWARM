@@ -20,8 +20,11 @@ torchvision = "*"
 torchaudio = "*"
 ipynb = "*"
 ipykernel = "*"
+python-dotenv = "*"
+sgp4 = "*"
 
 [dev-packages]
+pytest = "*"
 
 [requires]
 python_version = "3.12"

@@ -1,4 +1,4 @@
-from zstandard import zstd
+import zstandard as zstd
 import io
 import os
 from custom_satkit.CustomTLE import CustomTLE as TLE
@@ -28,43 +28,25 @@ def read_zst(filepath: str) -> list[str]:
     return lines
 
 def read_blocks(file_lines: list[str], num_lines_per_block: int = 5003):
-    """
-        Processes a list of file lines to extract TLE (Two-Line Element) objects and satellite state data.
-
-        Args:
-            file_lines (list[str]): A list of strings representing the lines of a file. 
-                                    Each block of 5003 lines contains 2 lines for TLE data 
-                                    and 5001 lines for satellite state data.
-            num_lines_per_block (int, optional): The number of lines per block. Defaults to 5003.
-
-        Returns:
-            tuple[list[TLE], list[TLE]]: A tuple containing two lists:
-                - The first list contains TLE objects extracted from the file lines.
-                - The second list contains State objects representing satellite state data.
-
-        Raises:
-            IndexError: If the input file lines do not conform to the expected block structure.
-            ValueError: If the TLE or State objects cannot be created due to malformed input.
-
-        Notes:
-            - The State class is imported dynamically from `custom_dataset.dataset`.
-        """
-    from custom_dataset.dataset import State, TrainingStep
+    """   
+     Parses a list of lines from a file containing TLEs and satellite state data into blocks.
+    Each block consists of two TLE lines followed by a specified number of satellite state lines.
+    For each block, the function creates a TLE object, a tuple of State objects, computes the time
+    since the TLE epoch for each state, and returns a list of TrainingStep objects containing these.
+    Args:
+        file_lines (list[str]): List of lines read from the input file.
+        num_lines_per_block (int, optional): Number of lines per block (2 for TLE + N for states).
+            Defaults to 5003 (2 TLE lines + 5001 state lines).
+    Returns:
+        list[TrainingStep]: List of TrainingStep objects, each containing a TLE, states, and time since epoch."""
+    from lazy_dataset.dataset import State, TrainingStep
     def compute_tsinces(epoch:float, states: list[State]):
         """
         Epoch: Unix timestamp of TLE
         States: List of State objects representing satellite states in time
         """
-        tsinces = []
+        return tuple((state.dt_time - epoch).total_seconds() for state in states)
 
-        tuple()
-
-        for state in states:
-            tsince = (state.time - epoch) / 60
-            tsinces.append(tsince)
-
-        return tsinces
-    
     def process_block(start_idx: int, end_idx: int):
         tle = TLE([file_lines[start_idx].rstrip(), file_lines[start_idx+1].rstrip()])
         states = tuple(State(file_lines[j]) for j in range(start_idx+2, end_idx))
@@ -73,7 +55,7 @@ def read_blocks(file_lines: list[str], num_lines_per_block: int = 5003):
     num_tles = int(len(file_lines)/num_lines_per_block) # 2 lines for TLE, 5001 lines for satstates
     start = 0
     steps: list[TrainingStep] = []
-    
+
     for _ in range(num_tles): #for each TLE
         upper_end = start + num_lines_per_block
         tle, states = process_block(start, upper_end)

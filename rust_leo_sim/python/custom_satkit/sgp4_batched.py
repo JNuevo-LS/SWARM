@@ -1,6 +1,6 @@
 import torch
 import numpy 
-from CustomTLE import CustomTLE
+from .CustomTLE import CustomTLE
 
 def sgp4_batched(satellite_batch, tsince):
     """

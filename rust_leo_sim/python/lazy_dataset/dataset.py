@@ -17,8 +17,8 @@ class State:
     def __init__(self, line:str):
         orbital_data = line.split(",")
 
-        dt_time = datetime.datetime.fromtimestamp(float(orbital_data[0].rstrip())) #to be optimized
-        self.time = time.from_datetime(dt_time)
+        self.dt_time = datetime.datetime.fromtimestamp(float(orbital_data[0].rstrip())) #to be optimized
+        # self.time = time.from_datetime(self.dt_time)
         self.pos_x = float(orbital_data[1])
         self.pos_y = float(orbital_data[2])
         self.pos_z = float(orbital_data[3])
@@ -98,6 +98,7 @@ class LazyDataset(Dataset):
         Initializes the iterator by resetting the batch index.
         """
         self.current_batch_idx = 0
+        self._get_next_batch()  # Load the first batch
         return self
 
     def __next__(self):
@@ -113,26 +114,26 @@ class LazyDataset(Dataset):
         if abs(idx) >= self.num_batches:
             raise IndexError(f"Index {idx} out of range for dataset with {self.num_batches} batches.")
 
-        line_args = [(f"{self.folder}/{filepath}",) for filepath in self.batches[idx]]
-        loaded_lines = read_zst(line_args)
+        line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
+        loaded_lines = [read_zst(filepath) for filepath in line_args]
 
-        batch_args = [(lines,) for lines in loaded_lines]
-        loaded_batch = read_blocks(batch_args)
+        loaded_batch = []
+        for file_lines in loaded_lines:
+            loaded_batch.extend(read_blocks(file_lines))
         return loaded_batch
 
     def _get_batch_pooled(self, idx):
         if abs(idx) >= self.num_batches:
             raise IndexError(f"Index {idx} out of range for dataset with {self.num_batches} batches.")
         
-        with Pool(5) as pool:
+        with Pool(1) as pool:
             line_args = [(f"{self.folder}/{filepath}",) for filepath in self.batches[idx]]
             loaded_lines = pool.starmap(read_zst, line_args)
 
-            batch_args = [(lines,) for lines in loaded_lines]
-            loaded_batch = pool.starmap(read_blocks, batch_args)
+            loaded_batch = pool.starmap(read_blocks, (loaded_lines,))
         return loaded_batch
         
-    def _batch_list(input_list: list, batch_size: int = 8):
+    def _batch_list(self, input_list: list, batch_size: int = 8):
         """
         Divides a given list into sublists of size = batch_size
         """

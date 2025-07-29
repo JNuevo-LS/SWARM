@@ -115,7 +115,7 @@ def propagate_batch(tles, tsinces, initialized=True):
     ----------------
     state (``torch.tensor``): (Nx2x3) tensor representing position and velocity in km and km/s, where the first dimension is the batch size.
     """
-    from sgp4_batched import sgp4_batched
+    from .sgp4_batched import sgp4_batched
     if not initialized:
         _,tles=initialize_tle(tles)
     state=sgp4_batched(tles, tsinces)
