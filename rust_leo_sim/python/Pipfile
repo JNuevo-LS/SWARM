@@ -25,6 +25,7 @@ sgp4 = "*"
 
 [dev-packages]
 pytest = "*"
+pytest-mock = "*"
 
 [requires]
 python_version = "3.12"
