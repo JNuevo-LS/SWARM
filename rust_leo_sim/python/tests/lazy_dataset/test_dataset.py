@@ -1,10 +1,13 @@
-import pytest
-from unittest.mock import MagicMock
-import numpy as np
-import math
 import datetime
+import math
 import os
-from lazy_dataset.dataset import State, LazyDataset, TrainingStep, CurrentBatch
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+
+from lazy_dataset.dataset import CurrentBatch, LazyDataset, State, TrainingStep
+
 
 # State class tests
 def test_state_initialization_and_vectors():
@@ -42,6 +45,7 @@ def mock_dataset_folder(mocker):
                   "file6.zst", "file7.zst", "file8.zst", "file9.zst", "file10.zst"]
     mocker.patch("lazy_dataset.dataset.os.path.exists", return_value=True)
     mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)  
+    yield "mock_dataset_folder"
 
 def test_lazy_dataset_batching(mocker):
     mock_files = [["mock_file"]] * 10  # Simulate 10 files
@@ -56,7 +60,6 @@ def test_lazy_dataset_batching(mocker):
         assert 1 <= len(batch) <= 3
 
 def test_lazy_dataset_randomized_order(mocker):
-
     # Mock a lot of files to ensure randomness
     mock_files = []
     for i in range(100):
@@ -108,6 +111,35 @@ def test_lazy_dataset_batch_list():
     batches = ds._batch_list(input_list, batch_size=3)
     assert batches == [[0,1,2],[3,4,5],[6]]
 
+def test_lazy_dataset_get_batch(mock_dataset_folder, mocker):
+    # Mock reading to return dummy data
+    mocker.patch("lazy_dataset.dataset.read_zst", return_value=["line1", "line2"])
+    mock_step = MagicMock(spec_set=TrainingStep)
+    mocker.patch("lazy_dataset.dataset.read_blocks", return_value=[mock_step])
+
+    ds = LazyDataset(mock_dataset_folder, batch_size=2)
+
+    batch = ds._get_batch(0)
+    assert isinstance(batch, list)
+    assert all(isinstance(f, TrainingStep) for f in batch)
+
+def test_lazy_dataset_get_batch_pooled(mock_dataset_folder, mocker):
+    mocker.patch("lazy_dataset.dataset.read_zst", return_value=["line1", "line2"])
+    mock_step = MagicMock(spec_set=TrainingStep)
+    mocker.patch("lazy_dataset.dataset.read_blocks", return_value=[mock_step])
+
+    ds = LazyDataset(mock_dataset_folder, batch_size=2, multiprocess=True)
+
+    # mock the multiprocessing pool
+    mock_pool = mocker.patch("lazy_dataset.dataset.Pool")
+    mock_pool_instance = mock_pool.return_value.__enter__.return_value
+
+    batch = ds._get_batch_pooled(0)
+
+    mock_pool_instance.map.assert_called_once()
+    assert isinstance(batch, list)
+    assert all(isinstance(f, TrainingStep) for f in batch)
+    
 # Training Step and CurrentBatch
 def test_training_step_and_current_batch():
     # Dummy TLE and State
