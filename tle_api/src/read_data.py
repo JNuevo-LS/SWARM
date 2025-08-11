@@ -91,7 +91,7 @@ def parseObjData(metadata: str, orbitals: str):
       raise RuntimeError(f"Failed to Write: {e}")
 
 
-def createSatObj(name, tle1, tle2):
+def create_sat(name, tle1, tle2):
    metadata, orbitals = parseObjData(tle1, tle2)
    sat = Satellite(name, metadata, orbitals)
    return sat
