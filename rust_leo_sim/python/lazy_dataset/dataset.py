@@ -1,25 +1,27 @@
 import datetime
+import logging
 import math
+import multiprocessing as mp
 import os
 from dataclasses import dataclass
+from functools import partial
 from itertools import chain
 from multiprocessing import Pool
 from random import shuffle
 
 import numpy as np
-from satkit import satstate
+from satkit import satstate, time
+from dsgp4.tle import TLE
 from torch.utils.data import Dataset
+from util.read import ResultReader
 
-from custom_satkit.CustomTLE import CustomTLE as TLE
-from util.read import read_blocks, read_zst
-
+mp.set_start_method("spawn", force=True)  # For CUDA compatibility on some platforms
 
 class State:
     def __init__(self, line:str):
         orbital_data = line.split(",")
 
-        self.dt_time = datetime.datetime.fromtimestamp(float(orbital_data[0].rstrip())) #to be optimized
-        # self.time = time.from_datetime(self.dt_time)
+        self.dt_time = datetime.datetime.fromtimestamp(float(orbital_data[0].rstrip()))
         self.pos_x = float(orbital_data[1])
         self.pos_y = float(orbital_data[2])
         self.pos_z = float(orbital_data[3])
@@ -49,18 +51,24 @@ class State:
         """
         Returns a SatState object from satkit with the current object's data
         """
-        return satstate(self.time, self.get_position_vector(), self.get_velocity_vector())
+        return satstate(time.from_datetime(self.dt_time), self.get_position_vector(), self.get_velocity_vector())
     
 @dataclass
 class TrainingStep:
     tle: TLE
-    states: tuple[State]
-    tsinces: tuple[int]
+    states: tuple[State, ...]
+    tsinces: tuple[int, ...]
 
 @dataclass
 class CurrentBatch:
     idx: int
     training_step: list[TrainingStep]
+
+# Must be external to LazyDataset for multiprocessing
+def process_file(filepath: str, num_lines_per_block: int, num_states_per_tle: int):
+    reader = ResultReader(num_lines_per_block, num_states_per_tle)
+    lines = reader.read_zst(filepath)
+    return reader.read_blocks(lines)
 
 class LazyDataset(Dataset):
     def __init__(
@@ -69,6 +77,8 @@ class LazyDataset(Dataset):
             batch_size: int = 8, 
             randomized_order: bool = True, 
             multiprocess: bool = False,
+            num_lines_per_block: int = 1002,
+            num_states_per_tle: int = 1000
             ):
         self.folder = folder
         self.batch_size = batch_size
@@ -77,14 +87,16 @@ class LazyDataset(Dataset):
         files = self._read_folder()
         self.batches = self._batch_list(files, self.batch_size)
 
-
-        self.loaded_in: CurrentBatch = None #used to store the currently loaded batch data
+        self.loaded_in: CurrentBatch | None = None #used to store the currently loaded batch data
         self.batcher = self._get_batch if not multiprocess else self._get_batch_pooled
+        self.reader = ResultReader(num_lines_per_block=num_lines_per_block, num_states_per_tle=num_states_per_tle)
 
         if self.randomized_order:
             shuffle(self.batches)
 
         self.current_batch_idx = 0
+
+        logging.info(f"Initialized LazyDataset with {len(self.batches)} batches of size {self.batch_size} from folder '{self.folder}'")
 
     def __getitem__(self, idx: int):
         if abs(idx) >= len(self.batches):
@@ -108,13 +120,13 @@ class LazyDataset(Dataset):
     def _get_batch(self, idx: int):
         if abs(idx) >= len(self.batches):
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
-
+    
         line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
-        loaded_lines: list[list[str]] = [read_zst(filepath) for filepath in line_args]
+        loaded_lines: list[list[str]] = [self.reader.read_zst(filepath) for filepath in line_args]
 
         loaded_batch: list[TrainingStep] = []
         for file_lines in loaded_lines:
-            loaded_batch.extend(read_blocks(file_lines))
+            loaded_batch.extend(self.reader.read_blocks(file_lines))
         return loaded_batch
 
     def _get_batch_pooled(self, idx: int, use_imap: bool = False):
@@ -127,15 +139,16 @@ class LazyDataset(Dataset):
         if abs(idx) >= len(self.batches):
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
 
-        def process_file(filepath):
-            lines = read_zst(filepath)
-            return read_blocks(lines)
-
         with Pool() as pool:
             line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
 
-            batch_results: list[list[TrainingStep]] = pool.imap(process_file, line_args) if use_imap else pool.map(process_file, line_args)
-            loaded_batch: list[TrainingStep] = list(chain.from_iterable(batch_results))  # Flatten the list of lists
+            process_file_partial = partial(process_file, num_lines_per_block=self.reader.num_lines_per_block, num_states_per_tle=self.reader.num_states_per_tle)
+
+            batch_results = pool.imap(process_file_partial, line_args) if use_imap else pool.map(process_file_partial, line_args)
+            if use_imap:
+                batch_results = list(batch_results)
+            loaded_batch: list[TrainingStep] = list(chain.from_iterable(batch_results))
+
         return loaded_batch
         
     def _batch_list(self, input_list: list, batch_size: int):

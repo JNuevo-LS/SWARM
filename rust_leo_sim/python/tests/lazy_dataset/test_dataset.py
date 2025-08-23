@@ -27,30 +27,44 @@ def test_state_initialization_and_vectors():
     assert np.allclose(pos_vec, [1000, 2000, 3000])
     assert np.allclose(vel_vec, [4000, 5000, 6000])
 
+
 def test_state_velocity_magnitude():
     line = "0,0,0,0,3000,4000,0"
     state = State(line)
     expected_mag = math.sqrt(3000**2 + 4000**2 + 0**2) / 1000
     assert np.isclose(state.get_velocity_magnitude(), expected_mag)
 
+
 def test_state_invalid_line():
     with pytest.raises(IndexError):
         State("1,2,3")  # Not enough values
+
 
 # LazyDataset
 @pytest.fixture
 def mock_dataset_folder(mocker):
     # Mock the file reading functions
-    mock_files = ["file1.zst", "file2.zst", "file3.zst", "file4.zst", "file5.zst", 
-                  "file6.zst", "file7.zst", "file8.zst", "file9.zst", "file10.zst"]
+    mock_files = [
+        "file1.zst",
+        "file2.zst",
+        "file3.zst",
+        "file4.zst",
+        "file5.zst",
+        "file6.zst",
+        "file7.zst",
+        "file8.zst",
+        "file9.zst",
+        "file10.zst",
+    ]
     mocker.patch("lazy_dataset.dataset.os.path.exists", return_value=True)
-    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)  
+    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)
     yield "mock_dataset_folder"
+
 
 def test_lazy_dataset_batching(mocker):
     mock_files = [["mock_file"]] * 10  # Simulate 10 files
     mocker.patch("lazy_dataset.dataset.os.path.exists", return_value=True)
-    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)    
+    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)
 
     ds = LazyDataset("mock_folder", batch_size=3, randomized_order=False)
 
@@ -59,6 +73,7 @@ def test_lazy_dataset_batching(mocker):
     for batch in ds.batches:
         assert 1 <= len(batch) <= 3
 
+
 def test_lazy_dataset_randomized_order(mocker):
     # Mock a lot of files to ensure randomness
     mock_files = []
@@ -66,13 +81,14 @@ def test_lazy_dataset_randomized_order(mocker):
         mock_files.append(f"file{i}.zst")
 
     mocker.patch("lazy_dataset.dataset.os.path.exists", return_value=True)
-    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)    
+    mocker.patch("lazy_dataset.dataset.os.listdir", return_value=mock_files)
 
     ds1 = LazyDataset("mock_folder", batch_size=2, randomized_order=True)
     ds2 = LazyDataset("mock_folder", batch_size=2, randomized_order=True)
 
     # Order is randomized, so batches should differ
     assert ds1.batches != ds2.batches
+
 
 def test_lazy_dataset_getitem(mock_dataset_folder):
     ds = LazyDataset(mock_dataset_folder, batch_size=4)
@@ -84,15 +100,17 @@ def test_lazy_dataset_getitem(mock_dataset_folder):
     with pytest.raises(IndexError):
         _ = ds[100]
 
+
 def test_lazy_dataset_len(mock_dataset_folder):
     ds = LazyDataset(mock_dataset_folder, batch_size=5)
     assert len(ds) == 2
 
+
 def test_lazy_dataset_iter(mock_dataset_folder, monkeypatch):
     # Patch read_zst and read_blocks to return dummy data
-    monkeypatch.setattr("lazy_dataset.dataset.read_zst", lambda f: ["line1", "line2"])
-    monkeypatch.setattr("lazy_dataset.dataset.read_blocks", lambda lines: [lines])
-    
+    monkeypatch.setattr("lazy_dataset.dataset.ResultReader.read_zst", lambda self, f: ["line1", "line2"])
+    monkeypatch.setattr("lazy_dataset.dataset.ResultReader.read_blocks", lambda self, lines: [lines])
+
     ds = LazyDataset(mock_dataset_folder, batch_size=2)
     batches = []
     for batch in ds:
@@ -100,22 +118,25 @@ def test_lazy_dataset_iter(mock_dataset_folder, monkeypatch):
         batches.append(batch)
     assert len(batches) == len(ds)
 
+
 def test_lazy_dataset_no_batches(tmp_path):
     # Empty folder
     with pytest.raises(ValueError):
         LazyDataset(str(tmp_path), batch_size=2)
 
+
 def test_lazy_dataset_batch_list():
     ds = LazyDataset.__new__(LazyDataset)
     input_list = list(range(7))
     batches = ds._batch_list(input_list, batch_size=3)
-    assert batches == [[0,1,2],[3,4,5],[6]]
+    assert batches == [[0, 1, 2], [3, 4, 5], [6]]
+
 
 def test_lazy_dataset_get_batch(mock_dataset_folder, mocker):
     # Mock reading to return dummy data
-    mocker.patch("lazy_dataset.dataset.read_zst", return_value=["line1", "line2"])
+    mocker.patch("lazy_dataset.dataset.ResultReader.read_zst", return_value=["line1", "line2"])
     mock_step = MagicMock(spec_set=TrainingStep)
-    mocker.patch("lazy_dataset.dataset.read_blocks", return_value=[mock_step])
+    mocker.patch("lazy_dataset.dataset.ResultReader.read_blocks", return_value=[mock_step])
 
     ds = LazyDataset(mock_dataset_folder, batch_size=2)
 
@@ -123,10 +144,11 @@ def test_lazy_dataset_get_batch(mock_dataset_folder, mocker):
     assert isinstance(batch, list)
     assert all(isinstance(f, TrainingStep) for f in batch)
 
+
 def test_lazy_dataset_get_batch_pooled(mock_dataset_folder, mocker):
-    mocker.patch("lazy_dataset.dataset.read_zst", return_value=["line1", "line2"])
+    mocker.patch("lazy_dataset.dataset.ResultReader.read_zst", return_value=["line1", "line2"])
     mock_step = MagicMock(spec_set=TrainingStep)
-    mocker.patch("lazy_dataset.dataset.read_blocks", return_value=[mock_step])
+    mocker.patch("lazy_dataset.dataset.ResultReader.read_blocks", return_value=[mock_step])
 
     ds = LazyDataset(mock_dataset_folder, batch_size=2, multiprocess=True)
 
@@ -139,11 +161,14 @@ def test_lazy_dataset_get_batch_pooled(mock_dataset_folder, mocker):
     mock_pool_instance.map.assert_called_once()
     assert isinstance(batch, list)
     assert all(isinstance(f, TrainingStep) for f in batch)
-    
+
+
 # Training Step and CurrentBatch
 def test_training_step_and_current_batch():
     # Dummy TLE and State
-    class DummyTLE: pass
+    class DummyTLE:
+        pass
+
     dummy_tle = DummyTLE()
     dummy_state = State("0,1,2,3,4,5,6")
     ts = TrainingStep(tle=dummy_tle, states=(dummy_state,), tsinces=(0,))

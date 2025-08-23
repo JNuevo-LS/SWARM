@@ -9,15 +9,16 @@ num_files = len(all_files)
 
 random.shuffle(all_files)
 
-train_count = int(0.7*num_files)
-test_count = int(0.15*num_files)
+train_count = int(0.7 * num_files)
+test_count = int(0.15 * num_files)
 val_count = num_files - train_count - test_count
 
 train_set = all_files[:train_count]
-test_set = all_files[train_count:train_count+test_count]
-val_set = all_files[train_count+test_count:train_count+test_count+val_count]
+test_set = all_files[train_count : train_count + test_count]
+val_set = all_files[train_count + test_count : train_count + test_count + val_count]
 
-def split_to_folder(filepath_array, root_path:str, destination_filepath:str):
+
+def split_to_folder(filepath_array, root_path: str, destination_filepath: str):
     if os.path.exists(destination_filepath) != True:
         os.makedirs(destination_filepath)
 
@@ -27,6 +28,7 @@ def split_to_folder(filepath_array, root_path:str, destination_filepath:str):
             os.rename(path, f"{destination_filepath}/{file}")
         except FileNotFoundError as e:
             print(f"File {file} was not found")
+
 
 print("Moving train folder...")
 t = time.time()
