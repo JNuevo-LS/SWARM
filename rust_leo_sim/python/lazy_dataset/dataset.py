@@ -10,7 +10,9 @@ from multiprocessing import Pool
 from random import shuffle
 
 import numpy as np
-from satkit import satstate, time
+from satkit import satstate
+import satkit as sk
+import time
 from dsgp4.tle import TLE
 from torch.utils.data import Dataset
 from util.read import ResultReader
@@ -22,12 +24,12 @@ class State:
         orbital_data = line.split(",")
 
         self.dt_time = datetime.datetime.fromtimestamp(float(orbital_data[0].rstrip()))
-        self.pos_x = float(orbital_data[1])
-        self.pos_y = float(orbital_data[2])
-        self.pos_z = float(orbital_data[3])
-        self.vel_x = float(orbital_data[4])
-        self.vel_y = float(orbital_data[5])
-        self.vel_z = float(orbital_data[6])
+        self.pos_x = float(orbital_data[1]) / 1000
+        self.pos_y = float(orbital_data[2]) / 1000  
+        self.pos_z = float(orbital_data[3]) / 1000
+        self.vel_x = float(orbital_data[4]) / 1000
+        self.vel_y = float(orbital_data[5]) / 1000
+        self.vel_z = float(orbital_data[6]) / 1000
     
     def get_position_vector(self):
         """
@@ -51,7 +53,7 @@ class State:
         """
         Returns a SatState object from satkit with the current object's data
         """
-        return satstate(time.from_datetime(self.dt_time), self.get_position_vector(), self.get_velocity_vector())
+        return satstate(sk.time.from_datetime(self.dt_time), self.get_position_vector(), self.get_velocity_vector())
     
 @dataclass
 class TrainingStep:
@@ -85,7 +87,12 @@ class LazyDataset(Dataset):
         self.randomized_order = randomized_order
 
         files = self._read_folder()
+
+        if self.randomized_order:
+            shuffle(files)
+
         self.batches = self._batch_list(files, self.batch_size)
+        
 
         self.loaded_in: CurrentBatch | None = None #used to store the currently loaded batch data
         self.batcher = self._get_batch if not multiprocess else self._get_batch_pooled
@@ -99,6 +106,7 @@ class LazyDataset(Dataset):
         logging.info(f"Initialized LazyDataset with {len(self.batches)} batches of size {self.batch_size} from folder '{self.folder}'")
 
     def __getitem__(self, idx: int):
+        logging.info(f"Loading batch {idx} from disk")
         if abs(idx) >= len(self.batches):
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
 
@@ -118,7 +126,9 @@ class LazyDataset(Dataset):
             yield self._get_next_batch()
 
     def _get_batch(self, idx: int):
+        start = time.time()
         if abs(idx) >= len(self.batches):
+            logging.error(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
     
         line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
@@ -127,6 +137,7 @@ class LazyDataset(Dataset):
         loaded_batch: list[TrainingStep] = []
         for file_lines in loaded_lines:
             loaded_batch.extend(self.reader.read_blocks(file_lines))
+        logging.info(f"Loaded batch {idx} from disk in {time.time() - start:.2f} seconds")
         return loaded_batch
 
     def _get_batch_pooled(self, idx: int, use_imap: bool = False):
@@ -136,9 +147,12 @@ class LazyDataset(Dataset):
             idx (int): Index of the batch to get.
             use_imap (bool): If True, uses imap for lazy loading of results. (Better for very large datasets only)
         """
+        start = time.time()
         if abs(idx) >= len(self.batches):
+            logging.error(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
 
+        logging.info(f"Using multiprocessing to load batch {idx} from disk with {mp.cpu_count()} processes")
         with Pool() as pool:
             line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
 
@@ -148,7 +162,7 @@ class LazyDataset(Dataset):
             if use_imap:
                 batch_results = list(batch_results)
             loaded_batch: list[TrainingStep] = list(chain.from_iterable(batch_results))
-
+        logging.info(f"Loaded batch {idx} from disk in {time.time() - start:.2f} seconds")
         return loaded_batch
         
     def _batch_list(self, input_list: list, batch_size: int):
@@ -177,11 +191,15 @@ class LazyDataset(Dataset):
         Reads the folder and returns a list of files.
         """
         if not os.path.exists(self.folder):
+            logging.error(f"Dataset folder '{self.folder}' does not exist.")
             raise FileNotFoundError(f"Dataset folder '{self.folder}' does not exist.")
         
         files = os.listdir(self.folder)
         if not files:
+            logging.error(f"No files found in dataset folder '{self.folder}'.")
             raise ValueError(f"No files found in dataset folder '{self.folder}'.")
+        
+        logging.info(f"Found {len(files)} files in dataset folder '{self.folder}'")
         
         return files
     

@@ -40,7 +40,7 @@ class ResultReader():
             Epoch: Unix timestamp of TLE
             States: List of State objects representing satellite states in time
             """
-            return tuple((state.dt_time - epoch).total_seconds() for state in states)
+            return tuple((state.dt_time - epoch).total_seconds() for state in states) # type: ignore
 
         def _process_block(start_idx: int, end_idx: int):
             tle = TLE([file_lines[start_idx].rstrip(), file_lines[start_idx + 1].rstrip()])

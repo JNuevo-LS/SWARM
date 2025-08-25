@@ -10,7 +10,7 @@ fn main() {
     if args.len() > 1 {
         if args[1] == "n" { //key for numerical integration for now
             let satellites = read::read_txt_for_integration("./data/tle2024.txt").unwrap();
-            let _sim_result_streamed = numerical_integration::integrate(satellites, 5000, 3).unwrap();
+            let _sim_result_streamed = numerical_integration::integrate(satellites, 999, 3).unwrap();
         } else if args[1] == "t" { //key for training model for now
             println!("Nothing yet");
         } else if args[1] == "p" { //key for reading and propagating

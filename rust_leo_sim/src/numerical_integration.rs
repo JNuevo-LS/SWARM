@@ -7,7 +7,30 @@ use std::mem;
 use zstd::Encoder;
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 
+/// Contains the results of the parallel integration of satellite trajectories.
+//
+/// # Arguments
+/// * `map` - A HashMap mapping satellite IDs to vectors of TLEs (Two-Line Elements).
+/// * `density` - The number of integration steps between each interval. Results in density + 1 lines, not including TLE.
+/// * `compression_level` - The Zstandard compression level for output files.
+///
+/// The integration is performed using `parallel_stream_integration`, which processes the given map,
+/// simulation settings, density, and compression level. The results are streamed and saved to a
+/// compressed `.txt` file using Zstandard compression.
+///
+/// # Returns
+/// * `Result<()>` - Returns Ok(()) if integration and streaming succeed, or an error otherwise.
+///
+/// # Errors
+/// Returns an error if the integration or file streaming fails.
+///
+/// # Example
+/// ```rust
+/// let integration_results = parallel_stream_integration(map, &settings, density, compression_level)?;
+/// // Use integration_results for further analysis
+/// ```
 pub(crate) fn integrate(map: HashMap<String, Vec<TLE>>, density:u16, compression_level:i32) -> Result<()> { //integration using streaming to upload to S3 and save space on device
+
     println!("Converting to SatStates");
     let time = std::time::Instant::now();
     let map: HashMap<String, (Vec<TLE>, Vec<SatState>)> = convert_map_to_gcrf(map)?;
