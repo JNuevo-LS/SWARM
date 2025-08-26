@@ -27,9 +27,6 @@ class ResultReader():
         since the TLE epoch for each state, and returns a list of TrainingStep objects containing these.
         Args:
             file_lines (list[str]): List of lines read from the input file.
-            num_lines_per_block (int, optional): Number of lines per block (2 for TLE + N for states).
-                Defaults to 1002 (2 TLE lines + 1000 state lines).
-            num_states_per_tle (int, optional): Number of state lines per TLE. Defaults to 1000.
         Returns:
             list[TrainingStep]: List of TrainingStep objects, each containing a TLE, states, and time since epoch.
         """
