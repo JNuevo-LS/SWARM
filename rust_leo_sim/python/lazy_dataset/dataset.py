@@ -72,27 +72,49 @@ def process_file(filepath: str, num_lines_per_block: int, num_states_per_tle: in
     lines = reader.read_zst(filepath)
     return reader.read_blocks(lines)
 
+def setup_worker_logging():
+    """Configure logging for pool worker processes"""
+    logging.basicConfig(
+        level=logging.INFO, 
+        filename='training.log', 
+        filemode='a', 
+        format='%(asctime)s [PoolWorker] %(levelname)s:%(message)s'
+    )
+
 class LazyDataset(Dataset):
     def __init__(
             self, 
             folder: str, 
+            rank: int | None = None,
+            world_size: int = 1,
             batch_size: int = 8, 
             randomized_order: bool = True, 
             multiprocess: bool = False,
             num_lines_per_block: int = 1002,
-            num_states_per_tle: int = 1000
-            ):
+            num_states_per_tle: int = 1000,
+            epoch: int = 0,
+        ):
         self.folder = folder
         self.batch_size = batch_size
         self.randomized_order = randomized_order
+        self.world_size = world_size
 
-        files = self._read_folder()
+        all_files = self._read_folder()
 
         if self.randomized_order:
-            shuffle(files)
+            np.random.seed(42+epoch)
+            np.random.shuffle(all_files)
+
+        if world_size > 1 and rank is not None:
+            files_per_rank = math.ceil(len(all_files) / world_size)
+            start_idx = rank * files_per_rank
+            end_idx = min(start_idx + files_per_rank, len(all_files))
+            files = all_files[start_idx:end_idx]
+            logging.info(f"Processing files {start_idx} to {end_idx} out of {len(all_files)} total files | N = {len(files)}")
+        else:
+            files = all_files
 
         self.batches = self._batch_list(files, self.batch_size)
-        
 
         self.loaded_in: CurrentBatch | None = None #used to store the currently loaded batch data
         self.batcher = self._get_batch if not multiprocess else self._get_batch_pooled
@@ -100,6 +122,13 @@ class LazyDataset(Dataset):
 
         if self.randomized_order:
             shuffle(self.batches)
+        
+        if multiprocess:
+            processes_count = min(mp.cpu_count(), 4) # Limit to 4 to avoid overloading
+            logging.info(f"Initializing multiprocessing pool with {processes_count} processes")
+            self.pool = Pool(mp.cpu_count(), initializer=setup_worker_logging)
+        else:
+            self.pool = None
 
         self.current_batch_idx = 0
 
@@ -122,7 +151,7 @@ class LazyDataset(Dataset):
         """
         Sets up the iterator for the dataset.
         """
-        for batch in self.batches:
+        for _batch in self.batches:
             yield self._get_next_batch()
 
     def _get_batch(self, idx: int):
@@ -148,21 +177,27 @@ class LazyDataset(Dataset):
             use_imap (bool): If True, uses imap for lazy loading of results. (Better for very large datasets only)
         """
         start = time.time()
+
+        if self.pool is None:
+            logging.error("Multiprocessing pool not initialized.")
+            raise RuntimeError("Multiprocessing pool not initialized.")
+
         if abs(idx) >= len(self.batches):
             logging.error(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
             raise IndexError(f"Index {idx} out of range for dataset with {len(self.batches)} batches.")
 
-        logging.info(f"Using multiprocessing to load batch {idx} from disk with {mp.cpu_count()} processes")
-        with Pool() as pool:
-            line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
+        line_args = [f"{self.folder}/{filepath}" for filepath in self.batches[idx]]
 
-            process_file_partial = partial(process_file, num_lines_per_block=self.reader.num_lines_per_block, num_states_per_tle=self.reader.num_states_per_tle)
+        process_file_partial = partial(process_file, num_lines_per_block=self.reader.num_lines_per_block, num_states_per_tle=self.reader.num_states_per_tle)
 
-            batch_results = pool.imap(process_file_partial, line_args) if use_imap else pool.map(process_file_partial, line_args)
-            if use_imap:
-                batch_results = list(batch_results)
-            loaded_batch: list[TrainingStep] = list(chain.from_iterable(batch_results))
-        logging.info(f"Loaded batch {idx} from disk in {time.time() - start:.2f} seconds")
+        batch_results = self.pool.imap(process_file_partial, line_args) if use_imap else self.pool.map(process_file_partial, line_args)
+        if use_imap:
+            batch_results = list(batch_results)
+        
+        loaded_batch: list[TrainingStep] = list(chain.from_iterable(batch_results))
+
+        logging.info(f"Loaded batch {idx+1} from disk in {time.time() - start:.2f} seconds")
+        
         return loaded_batch
         
     def _batch_list(self, input_list: list, batch_size: int):
@@ -203,3 +238,8 @@ class LazyDataset(Dataset):
         
         return files
     
+    def __del__(self):
+        # Clean up pool when dataset is destroyed
+        if hasattr(self, 'pool') and self.pool:
+            self.pool.close()
+            self.pool.join()

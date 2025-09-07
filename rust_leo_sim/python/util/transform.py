@@ -1,7 +1,55 @@
 import datetime
+
 import numpy as np
-import torch
 import satkit as sk
+import torch
+from dsgp4.tle import TLE
+from lazy_dataset.dataset import State, TrainingStep
+
+
+def extract_batch_data(batch: list[TrainingStep], device: torch.device) -> tuple[list[TLE], list[State], torch.Tensor]:
+    """
+    Extracts TLEs and states from a batch of data.
+    """
+    tles = [step.tle for step in batch]
+    all_state_lists = [step.states for step in batch]
+    all_tsince_lists = [step.tsinces for step in batch]
+    states = [state for state_list in all_state_lists for state in state_list]
+
+    flattened_tles = [] # All TLEs repeated for each time step
+    batched_steps = []
+    for tle, tsince_list in zip(tles, all_tsince_lists):
+        flattened_tles.extend([tle] * len(tsince_list))
+        if len(tsince_list) > 0:
+            batched_steps.extend(tsince_list) # Represent steps as actual time since epoch values
+
+    batched_steps = torch.tensor(batched_steps, device=device)
+
+    return flattened_tles, states, batched_steps
+
+def denormalize_predictions(normalized_states: torch.Tensor, normalization_R=6958.137, normalization_V=7.947155867983262):
+    """Convert normalized predictions back to physical units."""
+    denormalized = torch.zeros_like(normalized_states)
+    denormalized[:, :3] = normalized_states[:, :3] * normalization_R  # km
+    denormalized[:, 3:] = normalized_states[:, 3:] * normalization_V  # km/s
+    return denormalized
+
+def normalize_ground_truth(states, normalization_R=6958.137, normalization_V=7.947155867983262):
+    """
+    Normalize ground truth states to match model's output space.
+    
+    Args:
+        states: Tensor [N, 6] with positions (km) and velocities (km/s)
+        
+    Returns:
+        normalized_states: Tensor [N, 6] in normalized units
+    """
+    normalized = torch.zeros_like(states)
+    normalized[:, :3] = states[:, :3] / normalization_R  # Normalize positions
+    normalized[:, 3:] = states[:, 3:] / normalization_V   # Normalize velocities
+    
+    return normalized
+
 
 def teme_to_gcrf(states_teme: torch.Tensor, epoch: float | sk.time) -> torch.Tensor:
     """
@@ -15,7 +63,7 @@ def teme_to_gcrf(states_teme: torch.Tensor, epoch: float | sk.time) -> torch.Ten
         states_gcrf: Tensor [N, 6]
     """
     import satkit as sk
-    
+
     # Get transformation matrix from TEME to GCRF at this epoch
     if not isinstance(epoch, sk.time):
         epoch = sk.time(epoch)
@@ -52,7 +100,7 @@ def gcrf_to_teme(states_gcrf: torch.Tensor, epoch: float | sk.time) -> torch.Ten
         states_teme: Tensor [N, 6]
     """
     import satkit as sk
-    
+
     # Get transformation matrix from TEME to GCRF at this epoch
     if not isinstance(epoch, sk.time):
         epoch = sk.time(epoch)

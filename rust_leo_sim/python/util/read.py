@@ -2,8 +2,10 @@ import io
 import logging
 import random
 
+import numpy as np
 import zstandard as zstd
 from dsgp4.tle import TLE
+
 
 class ResultReader():
     def __init__(self, num_lines_per_block: int, num_states_per_tle: int) -> None:
@@ -11,13 +13,10 @@ class ResultReader():
         self.num_states_per_tle = num_states_per_tle
         self.decompressor = zstd.ZstdDecompressor()
 
-        logging.info(f"Initialized ResultReader with {num_lines_per_block} lines per block, gathering {num_states_per_tle} states each.")
+        logging.debug(f"Initialized ResultReader with {num_lines_per_block} lines per block, gathering {num_states_per_tle} states each.")
 
         if num_states_per_tle + 2 > num_lines_per_block:
-            logging.error("num_states_per_tle + 2 cannot be greater than num_lines_per_block")
             raise ValueError("num_states_per_tle + 2 cannot be greater than num_lines_per_block")
-        elif num_states_per_tle + 2 < num_lines_per_block:
-            logging.info("num_states_per_tle + 2 is less than num_lines_per_block, some lines will be ignored")
 
     def read_blocks(self, file_lines: list[str]):
         """
@@ -40,8 +39,14 @@ class ResultReader():
             return tuple((state.dt_time - epoch).total_seconds() for state in states) # type: ignore
 
         def _process_block(start_idx: int, end_idx: int):
+            state_indices = np.random.choice(
+                range(start_idx + 2, end_idx), 
+                size=self.num_states_per_tle, 
+                replace=False
+            )
+
             tle = TLE([file_lines[start_idx].rstrip(), file_lines[start_idx + 1].rstrip()])
-            states = tuple(State(file_lines[j]) for j in random.sample(range(start_idx + 2, end_idx), self.num_states_per_tle))
+            states = tuple(State(file_lines[i]) for i in state_indices)
             return (tle, states)
 
         num_tles = int(
@@ -49,13 +54,13 @@ class ResultReader():
         )
 
         start = 0
-        steps: list[TrainingStep] = []
+        steps: list[TrainingStep] = [None] * num_tles  # type: ignore Preallocate list for efficiency
 
         for i in range(num_tles):  # for each TLE
             upper_end = start + self.num_lines_per_block
             tle, states = _process_block(start, upper_end)
             tsinces = _compute_tsinces(tle["_epoch"], states)
-            steps.append(TrainingStep(tle, states, tsinces))
+            steps[i] = TrainingStep(tle, states, tsinces)
 
         return steps
     
@@ -73,12 +78,11 @@ class ResultReader():
             - The function uses the Zstandard library to decompress the file.
             - Lines are stripped of trailing newline characters before being added to the list.
         """
-        logging.info(f"Reading and decompressing file: {filepath}")
-        lines = []
-        with open(filepath, "rb") as file:
+        logging.debug(f"Reading and decompressing file: {filepath}")
+        with open(filepath, "rb", buffering=8*1024*1024) as file: 
             reader = self.decompressor.stream_reader(file)
             text_stream = io.TextIOWrapper(reader, encoding="utf-8")
 
-            for line in text_stream:
-                lines.append(line.rstrip("\n"))
+            lines = [line.rstrip('\n') for line in text_stream]
+        
         return lines
